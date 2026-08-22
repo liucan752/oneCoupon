@@ -1,0 +1,14 @@
+# IDE metadata
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Build and runtime output
+**/target/
+*.log
+tmp/
+
+# OS metadata
+.DS_Store
+Thumbs.db
