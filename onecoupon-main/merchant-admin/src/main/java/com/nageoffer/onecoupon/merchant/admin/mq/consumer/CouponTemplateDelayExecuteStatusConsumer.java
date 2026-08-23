@@ -76,7 +76,8 @@ public class CouponTemplateDelayExecuteStatusConsumer implements RocketMQListene
         CouponTemplateDelayEvent message = messageWrapper.getMessage();
         LambdaUpdateWrapper<CouponTemplateDO> updateWrapper = Wrappers.lambdaUpdate(CouponTemplateDO.class)
                 .eq(CouponTemplateDO::getShopNumber, message.getShopNumber())
-                .eq(CouponTemplateDO::getId, message.getCouponTemplateId());
+                .eq(CouponTemplateDO::getId, message.getCouponTemplateId())
+                .eq(CouponTemplateDO::getStatus, CouponTemplateStatusEnum.ACTIVE.getStatus());
         CouponTemplateDO couponTemplateDO = CouponTemplateDO.builder()
                 .status(CouponTemplateStatusEnum.ENDED.getStatus())
                 .build();

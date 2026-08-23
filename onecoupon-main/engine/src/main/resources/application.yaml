@@ -81,6 +81,12 @@ rocketmq:
     retry-times-when-send-async-failed: 1
 
 one-coupon:
+  template-bloom:
+    version: v1
+    capacity: 1000000
+    false-probability: 0.001
+    # 仅在按分片扫描有效模板并完成回灌后置为 true；未就绪时 false 不能直接拒绝请求。
+    ready: false
   user-coupon-list:
     save-cache:
       type: direct # 有两个选项：direct 在流程里直接操作，binlog 通过解析数据库日志后操作

@@ -50,6 +50,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -67,11 +68,10 @@ public class CouponTemplateController {
     private final CouponTemplateService couponTemplateService;
 
     @Operation(summary = "商家创建优惠券模板")
-    @NoDuplicateSubmit(message = "请勿短时间内重复提交优惠券模板")
     @PostMapping("/api/merchant-admin/coupon-template/create")
-    public Result<Void> createCouponTemplate(@RequestBody CouponTemplateSaveReqDTO requestParam) {
-        couponTemplateService.createCouponTemplate(requestParam);
-        return Results.success();
+    public Result<Long> createCouponTemplate(@RequestHeader("Idempotency-Key") String requestId,
+                                             @RequestBody CouponTemplateSaveReqDTO requestParam) {
+        return Results.success(couponTemplateService.createCouponTemplate(requestId, requestParam));
     }
 
     @Operation(summary = "分页查询优惠券模板")

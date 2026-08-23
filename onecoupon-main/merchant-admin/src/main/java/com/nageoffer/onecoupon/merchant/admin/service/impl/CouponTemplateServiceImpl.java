@@ -37,6 +37,7 @@ package com.nageoffer.onecoupon.merchant.admin.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.SecureUtil;
 import com.alibaba.fastjson.JSON;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -58,22 +59,21 @@ import com.nageoffer.onecoupon.merchant.admin.dto.req.CouponTemplatePageQueryReq
 import com.nageoffer.onecoupon.merchant.admin.dto.req.CouponTemplateSaveReqDTO;
 import com.nageoffer.onecoupon.merchant.admin.dto.resp.CouponTemplatePageQueryRespDTO;
 import com.nageoffer.onecoupon.merchant.admin.dto.resp.CouponTemplateQueryRespDTO;
-import com.nageoffer.onecoupon.merchant.admin.mq.event.CouponTemplateDelayEvent;
-import com.nageoffer.onecoupon.merchant.admin.mq.producer.CouponTemplateDelayExecuteStatusProducer;
 import com.nageoffer.onecoupon.merchant.admin.service.CouponTemplateService;
 import com.nageoffer.onecoupon.merchant.admin.service.basics.chain.MerchantAdminChainContext;
 import lombok.RequiredArgsConstructor;
-import org.redisson.api.RBloomFilter;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Date;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.stream.Collectors;
+
+import com.nageoffer.onecoupon.merchant.admin.dao.entity.CouponTemplateCreateRequestDO;
+import com.nageoffer.onecoupon.merchant.admin.dao.entity.CouponTemplateOutboxDO;
+import com.nageoffer.onecoupon.merchant.admin.dao.mapper.CouponTemplateCreateRequestMapper;
+import com.nageoffer.onecoupon.merchant.admin.dao.mapper.CouponTemplateOutboxMapper;
+import org.springframework.transaction.annotation.Transactional;
 
 import static com.nageoffer.onecoupon.merchant.admin.common.constant.CouponTemplateConstant.CREATE_COUPON_TEMPLATE_LOG_CONTENT;
 import static com.nageoffer.onecoupon.merchant.admin.common.constant.CouponTemplateConstant.INCREASE_NUMBER_COUPON_TEMPLATE_LOG_CONTENT;
@@ -94,8 +94,8 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
     private final CouponTemplateMapper couponTemplateMapper;
     private final MerchantAdminChainContext merchantAdminChainContext;
     private final StringRedisTemplate stringRedisTemplate;
-    private final CouponTemplateDelayExecuteStatusProducer couponTemplateDelayExecuteStatusProducer;
-    private final RBloomFilter<String> couponTemplateQueryBloomFilter;
+    private final CouponTemplateCreateRequestMapper couponTemplateCreateRequestMapper;
+    private final CouponTemplateOutboxMapper couponTemplateOutboxMapper;
 
     @LogRecord(
             success = CREATE_COUPON_TEMPLATE_LOG_CONTENT,
@@ -104,61 +104,66 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
             extra = "{{#requestParam.toString()}}"
     )
     @Override
-    public void createCouponTemplate(CouponTemplateSaveReqDTO requestParam) {
+    @Transactional(rollbackFor = Exception.class)
+    public Long createCouponTemplate(String requestId, CouponTemplateSaveReqDTO requestParam) {
+        if (StrUtil.isBlank(requestId)) {
+            throw new ClientException("Idempotency-Key 不能为空");
+        }
+
+        Long shopNumber = UserContext.getShopNumber();
+        String requestHash = SecureUtil.md5(requestParam.toString());
+        CouponTemplateCreateRequestDO idempotency = CouponTemplateCreateRequestDO.builder()
+                .shopNumber(shopNumber)
+                .requestId(requestId)
+                .requestHash(requestHash)
+                .status("PROCESSING")
+                .build();
+        int inserted = couponTemplateCreateRequestMapper.insertOrIgnore(idempotency);
+        if (inserted == 0) {
+            CouponTemplateCreateRequestDO existing = couponTemplateCreateRequestMapper
+                    .selectByShopNumberAndRequestId(shopNumber, requestId);
+            if (existing != null && !Objects.equals(existing.getRequestHash(), requestHash)) {
+                throw new ClientException("Idempotency-Key 不能复用于不同的创建请求");
+            }
+            if (existing != null && existing.getTemplateId() != null) {
+                LogRecordContext.putVariable("bizNo", existing.getTemplateId());
+                return existing.getTemplateId();
+            }
+            throw new ClientException("优惠券模板创建请求处理中，请勿重复提交");
+        }
+        // 不依赖 JDBC 对 ON DUPLICATE KEY 的主键回填行为，按唯一键回查本事务内刚写入的请求记录。
+        CouponTemplateCreateRequestDO persistedIdempotency = couponTemplateCreateRequestMapper
+                .selectByShopNumberAndRequestId(shopNumber, requestId);
+        if (persistedIdempotency == null) {
+            throw new ServiceException("查询优惠券模板幂等请求失败");
+        }
+
         // 通过责任链验证请求参数是否正确
         merchantAdminChainContext.handler(MERCHANT_ADMIN_CREATE_COUPON_TEMPLATE_KEY.name(), requestParam);
 
         // 新增优惠券模板信息到数据库
         CouponTemplateDO couponTemplateDO = BeanUtil.toBean(requestParam, CouponTemplateDO.class);
         couponTemplateDO.setStatus(CouponTemplateStatusEnum.ACTIVE.getStatus());
-        couponTemplateDO.setShopNumber(UserContext.getShopNumber());
+        couponTemplateDO.setShopNumber(shopNumber);
         couponTemplateMapper.insert(couponTemplateDO);
 
         // 因为模板 ID 是运行中生成的，@LogRecord 默认拿不到，所以我们需要手动设置
         LogRecordContext.putVariable("bizNo", couponTemplateDO.getId());
 
-        // 缓存预热：通过将数据库的记录序列化成 JSON 字符串放入 Redis 缓存
-        CouponTemplateQueryRespDTO actualRespDTO = BeanUtil.toBean(couponTemplateDO, CouponTemplateQueryRespDTO.class);
-        Map<String, Object> cacheTargetMap = BeanUtil.beanToMap(actualRespDTO, false, true);
-        Map<String, String> actualCacheTargetMap = cacheTargetMap.entrySet().stream()
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey,
-                        entry -> entry.getValue() != null ? entry.getValue().toString() : ""
-                ));
-        String couponTemplateCacheKey = String.format(MerchantAdminRedisConstant.COUPON_TEMPLATE_KEY, couponTemplateDO.getId());
-
-        // 通过 LUA 脚本执行设置 Hash 数据以及设置过期时间
-        String luaScript = "redis.call('HMSET', KEYS[1], unpack(ARGV, 1, #ARGV - 1)) " +
-                "redis.call('EXPIREAT', KEYS[1], ARGV[#ARGV])";
-
-        List<String> keys = Collections.singletonList(couponTemplateCacheKey);
-        List<String> args = new ArrayList<>(actualCacheTargetMap.size() * 2 + 1);
-        actualCacheTargetMap.forEach((key, value) -> {
-            args.add(key);
-            args.add(value);
-        });
-
-        // 优惠券活动过期时间转换为秒级别的 Unix 时间戳
-        args.add(String.valueOf(couponTemplateDO.getValidEndTime().getTime() / 1000));
-
-        // 执行 LUA 脚本
-        stringRedisTemplate.execute(
-                new DefaultRedisScript<>(luaScript, Long.class),
-                keys,
-                args.toArray()
-        );
-
-        // 发送延时消息事件，优惠券活动到期修改优惠券模板状态
-        CouponTemplateDelayEvent templateDelayEvent = CouponTemplateDelayEvent.builder()
-                .shopNumber(UserContext.getShopNumber())
-                .couponTemplateId(couponTemplateDO.getId())
-                .delayTime(couponTemplateDO.getValidEndTime().getTime())
+        // Redis、Bloom、MQ 都是派生数据：在同一 MySQL 事务中记录 Outbox，提交后由调度器可靠投递。
+        CouponTemplateOutboxDO outbox = CouponTemplateOutboxDO.builder()
+                .shopNumber(shopNumber)
+                .templateId(couponTemplateDO.getId())
+                .eventType("TEMPLATE_CREATED")
+                .status("NEW")
+                .retryAt(new Date())
+                .attempts(0)
                 .build();
-
-        couponTemplateDelayExecuteStatusProducer.sendMessage(templateDelayEvent);
-
-        // 添加优惠券模板 ID 到布隆过滤器
-        couponTemplateQueryBloomFilter.add(String.valueOf(couponTemplateDO.getId()));
+        couponTemplateOutboxMapper.insert(outbox);
+        if (couponTemplateCreateRequestMapper.bindTemplateId(persistedIdempotency.getId(), shopNumber, couponTemplateDO.getId()) != 1) {
+            throw new ServiceException("绑定优惠券模板幂等请求失败");
+        }
+        return couponTemplateDO.getId();
     }
 
     @Override

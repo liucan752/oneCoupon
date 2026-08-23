@@ -68,6 +68,28 @@ rules:
           standard:
             shardingColumn: shop_number
             shardingAlgorithmName: coupon_template_log_table_mod
+      # 创建幂等记录与模板使用同一分片键，保证本地事务落到同一库表。
+      t_coupon_template_create_request:
+        actualDataNodes: ds_${0..1}.t_coupon_template_create_request_${0..15}
+        databaseStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_database_mod
+        tableStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_table_mod
+      # Outbox 与模板共分片；调度扫描可广播，抢占/状态更新必须携带 shop_number 精确路由。
+      t_coupon_template_outbox:
+        actualDataNodes: ds_${0..1}.t_coupon_template_outbox_${0..15}
+        databaseStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_database_mod
+        tableStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_table_mod
     shardingAlgorithms: # 分片算法定义集合
       coupon_template_database_mod: # 优惠券分库算法定义
         type: CLASS_BASED # 根据自定义库分片算法类进行分片

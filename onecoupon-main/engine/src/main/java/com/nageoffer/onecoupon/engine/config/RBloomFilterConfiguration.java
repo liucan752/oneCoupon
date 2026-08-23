@@ -54,9 +54,13 @@ public class RBloomFilterConfiguration {
      * 优惠券查询缓存穿透布隆过滤器
      */
     @Bean
-    public RBloomFilter<String> couponTemplateQueryBloomFilter(RedissonClient redissonClient, @Value("${framework.cache.redis.prefix:}") String cachePrefix) {
-        RBloomFilter<String> bloomFilter = redissonClient.getBloomFilter(cachePrefix + "couponTemplateQueryBloomFilter");
-        bloomFilter.tryInit(640L, 0.001);
+    public RBloomFilter<String> couponTemplateQueryBloomFilter(RedissonClient redissonClient,
+                                                                 @Value("${framework.cache.redis.prefix:}") String cachePrefix,
+                                                                 @Value("${one-coupon.template-bloom.version:v1}") String version,
+                                                                 @Value("${one-coupon.template-bloom.capacity:1000000}") long capacity,
+                                                                 @Value("${one-coupon.template-bloom.false-probability:0.001}") double falseProbability) {
+        RBloomFilter<String> bloomFilter = redissonClient.getBloomFilter(cachePrefix + "couponTemplateQueryBloomFilter:" + version);
+        bloomFilter.tryInit(capacity, falseProbability);
         return bloomFilter;
     }
 

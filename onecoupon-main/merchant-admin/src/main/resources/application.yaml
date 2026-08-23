@@ -83,3 +83,13 @@ rocketmq:
     send-message-timeout: 2000
     retry-times-when-send-failed: 1
     retry-times-when-send-async-failed: 1
+
+one-coupon:
+  template-bloom:
+    version: v1
+    capacity: 1000000
+    false-probability: 0.001
+  template-outbox:
+    fixed-delay-ms: 1000
+    batch-size: 100
+    lease-seconds: 30

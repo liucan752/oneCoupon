@@ -54,6 +54,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBloomFilter;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -63,6 +64,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Date;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -83,6 +85,12 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
     private final RedissonClient redissonClient;
     private final RBloomFilter<String> couponTemplateQueryBloomFilter;
 
+    /**
+     * 仅在全量回灌完成后开启 Bloom 的 false 快速拒绝，避免 Redis 重启后的假阴性。
+     */
+    @Value("${one-coupon.template-bloom.ready:false}")
+    private boolean couponTemplateBloomReady;
+
     @Override
     public CouponTemplateQueryRespDTO findCouponTemplate(CouponTemplateQueryReqDTO requestParam) {
         // 查询 Redis 缓存中是否存在优惠券模板信息
@@ -92,7 +100,7 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
         // 如果存在直接返回，不存在需要通过布隆过滤器、缓存空值以及双重判定锁的形式读取数据库中的记录
         if (MapUtil.isEmpty(couponTemplateCacheMap)) {
             // 判断布隆过滤器是否存在指定模板 ID，不存在直接返回错误
-            if (!couponTemplateQueryBloomFilter.contains(requestParam.getCouponTemplateId())) {
+            if (couponTemplateBloomReady && !couponTemplateQueryBloomFilter.contains(requestParam.getCouponTemplateId())) {
                 throw new ClientException("优惠券模板不存在");
             }
 
@@ -104,7 +112,6 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
             }
 
             // 获取优惠券模板分布式锁
-            // 关于缓存击穿更多注释事项，欢迎查看我的B站视频：https://www.bilibili.com/video/BV1qz421z7vC
             RLock lock = redissonClient.getLock(String.format(EngineRedisConstant.LOCK_COUPON_TEMPLATE_KEY, requestParam.getCouponTemplateId()));
             lock.lock();
 
@@ -121,7 +128,9 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
                     LambdaQueryWrapper<CouponTemplateDO> queryWrapper = Wrappers.lambdaQuery(CouponTemplateDO.class)
                             .eq(CouponTemplateDO::getShopNumber, Long.parseLong(requestParam.getShopNumber()))
                             .eq(CouponTemplateDO::getId, Long.parseLong(requestParam.getCouponTemplateId()))
-                            .eq(CouponTemplateDO::getStatus, CouponTemplateStatusEnum.ACTIVE.getStatus());
+                            .eq(CouponTemplateDO::getStatus, CouponTemplateStatusEnum.ACTIVE.getStatus())
+                            .le(CouponTemplateDO::getValidStartTime, new Date())
+                            .gt(CouponTemplateDO::getValidEndTime, new Date());
                     CouponTemplateDO couponTemplateDO = couponTemplateMapper.selectOne(queryWrapper);
 
                     // 优惠券模板不存在或者已过期加入空值缓存，并且抛出异常
@@ -168,7 +177,7 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
             }
         }
 
-        return BeanUtil.mapToBean(couponTemplateCacheMap, CouponTemplateQueryRespDTO.class, false, CopyOptions.create());
+        return assertEffective(BeanUtil.mapToBean(couponTemplateCacheMap, CouponTemplateQueryRespDTO.class, false, CopyOptions.create()));
     }
 
     @Override
@@ -231,7 +240,9 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
                     LambdaQueryWrapper<CouponTemplateDO> queryWrapper = Wrappers.lambdaQuery(CouponTemplateDO.class)
                             .eq(CouponTemplateDO::getShopNumber, Long.parseLong(requestParam.getShopNumber()))
                             .eq(CouponTemplateDO::getId, Long.parseLong(requestParam.getCouponTemplateId()))
-                            .eq(CouponTemplateDO::getStatus, CouponTemplateStatusEnum.ACTIVE.getStatus());
+                            .eq(CouponTemplateDO::getStatus, CouponTemplateStatusEnum.ACTIVE.getStatus())
+                            .le(CouponTemplateDO::getValidStartTime, new Date())
+                            .gt(CouponTemplateDO::getValidEndTime, new Date());
                     CouponTemplateDO couponTemplateDO = couponTemplateMapper.selectOne(queryWrapper);
 
                     // 优惠券模板不存在或者已过期直接抛出异常
@@ -277,7 +288,7 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
             }
         }
 
-        return BeanUtil.mapToBean(couponTemplateCacheMap, CouponTemplateQueryRespDTO.class, false, CopyOptions.create());
+        return assertEffective(BeanUtil.mapToBean(couponTemplateCacheMap, CouponTemplateQueryRespDTO.class, false, CopyOptions.create()));
     }
 
     /**
@@ -285,16 +296,31 @@ public class CouponTemplateServiceImpl extends ServiceImpl<CouponTemplateMapper,
      */
     public CouponTemplateQueryRespDTO findCouponTemplateV2(CouponTemplateQueryReqDTO requestParam) {
         // 判断布隆过滤器是否存在指定模板 ID，不存在直接返回错误
-        if (!couponTemplateQueryBloomFilter.contains(requestParam.getCouponTemplateId())) {
+        if (couponTemplateBloomReady && !couponTemplateQueryBloomFilter.contains(requestParam.getCouponTemplateId())) {
             throw new ClientException("优惠券模板不存在");
         }
 
         LambdaQueryWrapper<CouponTemplateDO> queryWrapper = Wrappers.lambdaQuery(CouponTemplateDO.class)
                 .eq(CouponTemplateDO::getShopNumber, Long.parseLong(requestParam.getShopNumber()))
                 .eq(CouponTemplateDO::getId, Long.parseLong(requestParam.getCouponTemplateId()))
-                .eq(CouponTemplateDO::getStatus, CouponTemplateStatusEnum.ACTIVE.getStatus());
+                .eq(CouponTemplateDO::getStatus, CouponTemplateStatusEnum.ACTIVE.getStatus())
+                .le(CouponTemplateDO::getValidStartTime, new Date())
+                .gt(CouponTemplateDO::getValidEndTime, new Date());
         CouponTemplateDO couponTemplateDO = couponTemplateMapper.selectOne(queryWrapper);
 
-        return BeanUtil.toBean(couponTemplateDO, CouponTemplateQueryRespDTO.class);
+        return assertEffective(BeanUtil.toBean(couponTemplateDO, CouponTemplateQueryRespDTO.class));
+    }
+
+    /**
+     * MQ 到期更新和 Redis TTL 都属于优化手段；模板有效性必须由查询结果再次兜底判断。
+     */
+    private CouponTemplateQueryRespDTO assertEffective(CouponTemplateQueryRespDTO response) {
+        Date now = new Date();
+        if (response == null || response.getValidStartTime() == null || response.getValidEndTime() == null
+                || response.getValidStartTime().after(now) || !response.getValidEndTime().after(now)
+                || !Integer.valueOf(CouponTemplateStatusEnum.ACTIVE.getStatus()).equals(response.getStatus())) {
+            throw new ClientException("优惠券模板不存在或已过期");
+        }
+        return response;
     }
 }
