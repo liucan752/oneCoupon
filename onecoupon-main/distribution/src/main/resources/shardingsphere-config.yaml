@@ -46,7 +46,38 @@ dataSources:
 
 rules:
   - !SHARDING
+    # 原有任务/失败表位于主库 ds_0；未命中显式分片规则的表走该库。
+    defaultDataSource: ds_0
     tables: # 需要分片的数据库表集合
+      # 批次和明细与模板使用相同的 shop_number 分库规则，确保库存裁决、明细状态和批次状态可在同库事务内推进。
+      t_coupon_task_batch:
+        actualDataNodes: ds_${0..1}.t_coupon_task_batch
+        databaseStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_database_mod
+      t_coupon_task_item:
+        actualDataNodes: ds_${0..1}.t_coupon_task_item
+        databaseStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_database_mod
+      t_coupon_task_batch_outbox:
+        actualDataNodes: ds_${0..1}.t_coupon_task_batch_outbox
+        databaseStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_database_mod
+      t_user_coupon_expire_outbox:
+        actualDataNodes: ds_${0..1}.t_user_coupon_expire_outbox_${0..31}
+        databaseStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: user_coupon_database_mod
+        tableStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: user_coupon_table_mod
       t_coupon_template: # 优惠券模板表
         # 真实存在数据库中的物理表
         actualDataNodes: ds_${0..1}.t_coupon_template_${0..15}

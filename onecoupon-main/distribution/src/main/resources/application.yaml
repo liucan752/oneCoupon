@@ -55,6 +55,11 @@ one-coupon:
     feign:
       remote-url:
         engine: http://127.0.0.1:10020
+    batch-outbox:
+      batch-size: 100
+      lease-seconds: 30
+      published-check-seconds: 15
+      fixed-delay-ms: 1000
 
 mybatis-plus:
   configuration:

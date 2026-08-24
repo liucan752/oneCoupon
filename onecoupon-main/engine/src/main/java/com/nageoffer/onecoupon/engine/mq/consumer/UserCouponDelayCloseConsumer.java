@@ -40,7 +40,6 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.nageoffer.onecoupon.engine.common.constant.EngineRedisConstant;
 import com.nageoffer.onecoupon.engine.common.constant.EngineRockerMQConstant;
-import com.nageoffer.onecoupon.engine.common.context.UserContext;
 import com.nageoffer.onecoupon.engine.common.enums.UserCouponStatusEnum;
 import com.nageoffer.onecoupon.engine.dao.entity.UserCouponDO;
 import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponMapper;
@@ -78,27 +77,38 @@ public class UserCouponDelayCloseConsumer implements RocketMQListener<MessageWra
         log.info("[消费者] 延迟关闭用户已领取优惠券 - 执行消费逻辑，消息体：{}", JSON.toJSONString(messageWrapper));
         UserCouponDelayCloseEvent event = messageWrapper.getMessage();
 
-        // 删除用户领取优惠券模板缓存记录
-        String userCouponListCacheKey = String.format(EngineRedisConstant.USER_COUPON_TEMPLATE_LIST_KEY, UserContext.getUserId());
+        // 延迟消息理论上应在 validEndTime 到达后才投递。若 Broker、时钟或人工补发
+        // 导致事件提前到达，不能先删 Redis，否则用户会在数据库仍为 UNUSED 时看不到
+        // 这张券。这里直接确认消息：Outbox 会在到期后观察到券仍是 UNUSED 并补投，
+        // 避免同一条提前消息被 Broker 快速重试直至进入死信队列。
+        if (event.getDelayTime() != null && event.getDelayTime() > System.currentTimeMillis()) {
+            log.warn("用户券到期事件提前到达，保留 Redis 投影等待 Outbox 补投，userCouponId={}",
+                    event.getUserCouponId());
+            return;
+        }
+
+        // 必须使用事件携带的 userId：MQ 消费线程没有 HTTP 用户上下文，UserContext 通常为空。
+        // 先做条件更新，重复消息/已使用券会返回 0，但不应阻止后续的缓存清理。
+        UserCouponDO userCouponDO = UserCouponDO.builder()
+                .status(UserCouponStatusEnum.EXPIRED.getCode())
+                .build();
+        LambdaUpdateWrapper<UserCouponDO> updateWrapper = Wrappers.lambdaUpdate(UserCouponDO.class)
+                .eq(UserCouponDO::getId, Long.parseLong(event.getUserCouponId()))
+                .eq(UserCouponDO::getUserId, Long.parseLong(event.getUserId()))
+                .eq(UserCouponDO::getCouponTemplateId, Long.parseLong(event.getCouponTemplateId()))
+                .eq(UserCouponDO::getStatus, UserCouponStatusEnum.UNUSED.getCode())
+                .le(UserCouponDO::getValidEndTime, new java.util.Date());
+        int updated = userCouponMapper.update(userCouponDO, updateWrapper);
+
+        // 删除是幂等操作：即使返回 0（重复消息或缓存已由查询侧懒清理），也不提前 return。
+        String userCouponListCacheKey = String.format(EngineRedisConstant.USER_COUPON_TEMPLATE_LIST_KEY, event.getUserId());
         String userCouponItemCacheKey = StrUtil.builder()
                 .append(event.getCouponTemplateId())
                 .append("_")
                 .append(event.getUserCouponId())
                 .toString();
         Long removed = stringRedisTemplate.opsForZSet().remove(userCouponListCacheKey, userCouponItemCacheKey);
-        if (removed == null || removed == 0L) {
-            return;
-        }
-
-        // 修改用户领券记录状态为已过期
-        UserCouponDO userCouponDO = UserCouponDO.builder()
-                .status(UserCouponStatusEnum.EXPIRED.getCode())
-                .build();
-        LambdaUpdateWrapper<UserCouponDO> updateWrapper = Wrappers.lambdaUpdate(UserCouponDO.class)
-                .eq(UserCouponDO::getId, event.getUserCouponId())
-                .eq(UserCouponDO::getUserId, event.getUserId())
-                .eq(UserCouponDO::getStatus, UserCouponStatusEnum.UNUSED.getCode())
-                .eq(UserCouponDO::getCouponTemplateId, event.getCouponTemplateId());
-        userCouponMapper.update(userCouponDO, updateWrapper);
+        log.info("[消费者] 用户券到期收敛，userCouponId={}, databaseUpdated={}, redisRemoved={}",
+                event.getUserCouponId(), updated, removed);
     }
 }

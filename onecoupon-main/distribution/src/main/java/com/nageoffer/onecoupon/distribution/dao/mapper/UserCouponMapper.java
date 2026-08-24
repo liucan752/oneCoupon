@@ -59,4 +59,18 @@ public interface UserCouponMapper extends BaseMapper<UserCouponDO> {
      */
     @Deprecated
     List<UserCouponDO> selectUserCourseMaxReceiveCount(@Param("couponTemplateId") Long couponTemplateId, @Param("userIds") List<Long> userIds);
+
+    /** 同批内先查已领用户，可避免无意义的库存预留和唯一键异常。 */
+    List<Long> selectExistingUserIds(@Param("couponTemplateId") Long couponTemplateId,
+                                     @Param("userIds") List<Long> userIds);
+
+    /**
+     * MySQL 唯一键是并发下的最终防线；INSERT IGNORE 让重复行返回 0 而不是回滚整批。
+     */
+    int insertIgnoreBatch(@Param("coupons") List<UserCouponDO> coupons);
+
+    /** 查询本次生成的雪花券 ID，精确获知 INSERT IGNORE 实际写入了哪些记录。 */
+    List<Long> selectExistingCouponIds(@Param("couponTemplateId") Long couponTemplateId,
+                                       @Param("userIds") List<Long> userIds,
+                                       @Param("couponIds") List<Long> couponIds);
 }

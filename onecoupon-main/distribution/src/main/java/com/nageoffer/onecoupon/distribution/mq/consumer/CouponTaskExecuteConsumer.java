@@ -42,20 +42,19 @@ import com.nageoffer.onecoupon.distribution.common.constant.DistributionRocketMQ
 import com.nageoffer.onecoupon.distribution.common.enums.CouponTaskStatusEnum;
 import com.nageoffer.onecoupon.distribution.common.enums.CouponTemplateStatusEnum;
 import com.nageoffer.onecoupon.distribution.dao.entity.CouponTemplateDO;
-import com.nageoffer.onecoupon.distribution.dao.mapper.CouponTaskFailMapper;
 import com.nageoffer.onecoupon.distribution.dao.mapper.CouponTaskMapper;
 import com.nageoffer.onecoupon.distribution.dao.mapper.CouponTemplateMapper;
 import com.nageoffer.onecoupon.distribution.mq.base.MessageWrapper;
 import com.nageoffer.onecoupon.distribution.mq.event.CouponTaskExecuteEvent;
-import com.nageoffer.onecoupon.distribution.mq.producer.CouponExecuteDistributionProducer;
 import com.nageoffer.onecoupon.distribution.service.handler.excel.CouponTaskExcelObject;
-import com.nageoffer.onecoupon.distribution.service.handler.excel.ReadExcelDistributionListener;
+import com.nageoffer.onecoupon.distribution.service.batch.CouponTaskBatchWriter;
+import com.nageoffer.onecoupon.distribution.service.batch.CouponTaskFinalizer;
+import com.nageoffer.onecoupon.distribution.service.handler.excel.DurableCouponTaskExcelListener;
 import com.nageoffer.onecoupon.framework.idempotent.NoMQDuplicateConsume;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 /**
@@ -76,15 +75,15 @@ public class CouponTaskExecuteConsumer implements RocketMQListener<MessageWrappe
 
     private final CouponTaskMapper couponTaskMapper;
     private final CouponTemplateMapper couponTemplateMapper;
-    private final CouponTaskFailMapper couponTaskFailMapper;
-
-    private final StringRedisTemplate stringRedisTemplate;
-    private final CouponExecuteDistributionProducer couponExecuteDistributionProducer;
+    private final CouponTaskBatchWriter couponTaskBatchWriter;
+    private final CouponTaskFinalizer couponTaskFinalizer;
 
     @NoMQDuplicateConsume(
             keyPrefix = "coupon_task_execute:idempotent:",
             key = "#messageWrapper.message.couponTaskId",
-            keyTimeout = 120
+            // Excel 解析可能长于原来的 120 秒。该锁仅减少同一文件的并发扫描；
+            // 最终幂等仍由 (task_id,row_num)/(task_id,batch_no) 唯一键承担，不能只依赖 Redis 锁。
+            keyTimeout = 21600
     )
     @Override
     public void onMessage(MessageWrapper<CouponTaskExecuteEvent> messageWrapper) {
@@ -93,6 +92,10 @@ public class CouponTaskExecuteConsumer implements RocketMQListener<MessageWrappe
 
         var couponTaskId = messageWrapper.getMessage().getCouponTaskId();
         var couponTaskDO = couponTaskMapper.selectById(couponTaskId);
+        if (couponTaskDO == null) {
+            log.warn("[消费者] 优惠券推送任务不存在，taskId={}", couponTaskId);
+            return;
+        }
         // 判断优惠券模板发送状态是否为执行中，如果不是有可能是被取消状态
         if (ObjectUtil.notEqual(couponTaskDO.getStatus(), CouponTaskStatusEnum.IN_PROGRESS.getStatus())) {
             log.warn("[消费者] 优惠券推送任务正式执行 - 推送任务记录状态异常：{}，已终止推送", couponTaskDO.getStatus());
@@ -104,6 +107,11 @@ public class CouponTaskExecuteConsumer implements RocketMQListener<MessageWrappe
                 .eq(CouponTemplateDO::getId, couponTaskDO.getCouponTemplateId())
                 .eq(CouponTemplateDO::getShopNumber, couponTaskDO.getShopNumber());
         var couponTemplateDO = couponTemplateMapper.selectOne(queryWrapper);
+        if (couponTemplateDO == null) {
+            log.warn("[消费者] 优惠券模板不存在，templateId={}, shopNumber={}",
+                    couponTaskDO.getCouponTemplateId(), couponTaskDO.getShopNumber());
+            return;
+        }
         var status = couponTemplateDO.getStatus();
         if (ObjectUtil.notEqual(status, CouponTemplateStatusEnum.ACTIVE.getStatus())) {
             log.error("[消费者] 优惠券推送任务正式执行 - 优惠券ID：{}，优惠券模板状态：{}", couponTaskDO.getCouponTemplateId(), status);
@@ -111,12 +119,12 @@ public class CouponTaskExecuteConsumer implements RocketMQListener<MessageWrappe
         }
 
         // 正式开始执行优惠券推送任务
-        ReadExcelDistributionListener readExcelDistributionListener = new ReadExcelDistributionListener(
+        DurableCouponTaskExcelListener readExcelDistributionListener = new DurableCouponTaskExcelListener(
                 couponTaskDO,
                 couponTemplateDO,
-                couponTaskFailMapper,
-                stringRedisTemplate,
-                couponExecuteDistributionProducer
+                couponTaskBatchWriter,
+                couponTaskMapper,
+                couponTaskFinalizer
         );
         EasyExcel.read(couponTaskDO.getFileAddress(), CouponTaskExcelObject.class, readExcelDistributionListener).sheet().doRead();
     }

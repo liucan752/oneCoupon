@@ -65,6 +65,11 @@ public final class DistributionRocketMQConstant {
      */
     public static final String TEMPLATE_EXECUTE_DISTRIBUTION_CG_KEY = "one-coupon_distribution-service_coupon-execute-distribution_cg${unique-name:}";
 
+    /** 持久化批次就绪事件；与旧 Redis Set 事件分 Topic，灰度期间不会被旧消费者误消费。 */
+    public static final String TEMPLATE_BATCH_READY_TOPIC_KEY = "one-coupon_distribution-service_coupon-batch-ready_topic${unique-name:}";
+
+    public static final String TEMPLATE_BATCH_READY_CG_KEY = "one-coupon_distribution-service_coupon-batch-ready_cg${unique-name:}";
+
     /**
      * 优惠券模板推送用户通知-执行消费者组 Key
      */

@@ -45,4 +45,10 @@ import com.nageoffer.onecoupon.distribution.dao.entity.CouponTaskDO;
  * 开发时间：2024-07-13
  */
 public interface CouponTaskMapper extends BaseMapper<CouponTaskDO> {
+
+    /** Excel 已完整读取；完成判断必须依赖数据库状态，不依赖可能乱序的结束消息。 */
+    int markInputCompleted(@org.apache.ibatis.annotations.Param("taskId") Long taskId);
+
+    /** Finalizer 已确认所有批次终态后，CAS 将任务推进为 SUCCESS。 */
+    int markSuccessIfAllBatchesFinished(@org.apache.ibatis.annotations.Param("taskId") Long taskId);
 }

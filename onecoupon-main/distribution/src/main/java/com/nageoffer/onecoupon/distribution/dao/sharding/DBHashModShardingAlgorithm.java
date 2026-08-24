@@ -43,7 +43,6 @@ import org.apache.shardingsphere.sharding.api.sharding.standard.StandardSharding
 import org.apache.shardingsphere.sharding.exception.algorithm.sharding.ShardingAlgorithmInitializationException;
 
 import java.util.Collection;
-import java.util.List;
 import java.util.Properties;
 
 /**
@@ -76,8 +75,8 @@ public final class DBHashModShardingAlgorithm implements StandardShardingAlgorit
 
     @Override
     public Collection<String> doSharding(Collection<String> availableTargetNames, RangeShardingValue<Long> shardingValue) {
-        // 暂无范围分片场景，默认返回空
-        return List.of();
+        // 批次 Outbox 调度器按状态扫描，不带 shop_number 精确值，必须广播到所有库；返回空会直接漏扫。
+        return availableTargetNames;
     }
 
     @Override

@@ -37,6 +37,7 @@ package com.nageoffer.onecoupon.engine;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 引擎服务｜负责优惠券单个查看、列表查看、锁定以及核销等功能
@@ -46,6 +47,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * 开发时间：2024-07-08
  */
 @SpringBootApplication
+@EnableScheduling
 @MapperScan("com.nageoffer.onecoupon.engine.dao.mapper")
 public class EngineApplication {
 

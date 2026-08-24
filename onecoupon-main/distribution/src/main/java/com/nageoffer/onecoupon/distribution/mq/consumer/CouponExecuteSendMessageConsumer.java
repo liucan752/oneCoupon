@@ -63,7 +63,7 @@ import java.util.List;
         topic = DistributionRocketMQConstant.TEMPLATE_EXECUTE_DISTRIBUTION_TOPIC_KEY,
         consumerGroup = DistributionRocketMQConstant.TEMPLATE_EXECUTE_SEND_MESSAGE_CG_KEY
 )
-@Slf4j(topic = "CouponExecuteDistributionConsumer")
+@Slf4j(topic = "CouponExecuteSendMessageConsumer")
 public class CouponExecuteSendMessageConsumer implements RocketMQListener<MessageWrapper<CouponTemplateDistributionEvent>> {
 
     private final DistributionStrategyChoose distributionStrategyChoose;
@@ -73,7 +73,7 @@ public class CouponExecuteSendMessageConsumer implements RocketMQListener<Messag
         // 开头打印日志，平常可 Debug 看任务参数，线上可报平安（比如消息是否消费，重新投递时获取参数等）
         log.info("[消费者] 优惠券任务执行推送@发送用户消息通知 - 执行消费逻辑，消息体：{}", JSON.toJSONString(messageWrapper));
 
-        // 通知 Excel 解析完成进行兜底保存数据库，本消费者直接跳过，CouponExecuteDistributionConsumer 有效
+        // 旧链路的“Excel 结束事件”已取消；当前每条消息仅代表一张已成功写入的用户券通知。
         if (messageWrapper.getMessage().getDistributionEndFlag()) {
             return;
         }

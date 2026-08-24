@@ -68,6 +68,16 @@ rules:
           standard:
             shardingColumn: user_id
             shardingAlgorithmName: user_coupon_table_mod
+      t_user_coupon_expire_outbox:
+        actualDataNodes: ds_${0..1}.t_user_coupon_expire_outbox_${0..31}
+        databaseStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: user_coupon_database_mod
+        tableStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: user_coupon_table_mod
       t_coupon_settlement:
         actualDataNodes: ds_${0..1}.t_coupon_settlement_${0..15}
         databaseStrategy:

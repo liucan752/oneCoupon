@@ -119,6 +119,12 @@ public class CouponTaskDO {
     private Integer status;
 
     /**
+     * Excel 是否已完整持久化到任务明细表。
+     * 该字段与批次终态共同构成任务完成屏障，不能仅以收到“结束消息”为准。
+     */
+    private Integer inputCompleted;
+
+    /**
      * 完成时间
      */
     private Date completionTime;

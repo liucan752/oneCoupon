@@ -54,4 +54,9 @@ public interface CouponTemplateMapper extends BaseMapper<CouponTemplateDO> {
      * @return 是否发生记录变更
      */
     int decrementCouponTemplateStock(@Param("shopNumber") Long shopNumber, @Param("couponTemplateId") Long couponTemplateId, @Param("decrementStock") Integer decrementStock);
+
+    /** 仅用于 INSERT IGNORE 因并发唯一键冲突而少发时归还多预留库存。 */
+    int incrementCouponTemplateStock(@Param("shopNumber") Long shopNumber,
+                                     @Param("couponTemplateId") Long couponTemplateId,
+                                     @Param("incrementStock") Integer incrementStock);
 }

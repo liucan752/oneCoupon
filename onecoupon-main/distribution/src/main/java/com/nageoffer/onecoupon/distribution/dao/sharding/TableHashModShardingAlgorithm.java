@@ -39,7 +39,6 @@ import org.apache.shardingsphere.sharding.api.sharding.standard.RangeShardingVal
 import org.apache.shardingsphere.sharding.api.sharding.standard.StandardShardingAlgorithm;
 
 import java.util.Collection;
-import java.util.List;
 
 /**
  * 基于 HashMod 方式自定义分表算法
@@ -67,8 +66,8 @@ public final class TableHashModShardingAlgorithm implements StandardShardingAlgo
 
     @Override
     public Collection<String> doSharding(Collection<String> availableTargetNames, RangeShardingValue<Long> shardingValue) {
-        // 暂无范围分片场景，默认返回空
-        return List.of();
+        // 未带分片键的批次 Outbox 查询需要广播所有物理表；当前批次表每库只有一张逻辑表。
+        return availableTargetNames;
     }
 
     private long hashShardingValue(final Comparable<?> shardingValue) {

@@ -96,8 +96,7 @@ public class CouponQueryServiceImpl implements CouponQueryService {
     @Override
     public QueryCouponsRespDTO listQueryUserCoupons(QueryCouponsReqDTO requestParam) {
         // Step 1: 获取 Redis 中的用户优惠券列表
-        Set<String> rangeUserCoupons = stringRedisTemplate.opsForZSet().range(
-                String.format(USER_COUPON_TEMPLATE_LIST_KEY, UserContext.getUserId()), 0, -1);
+        Set<String> rangeUserCoupons = findActiveUserCouponMembers();
 
         if (rangeUserCoupons == null || rangeUserCoupons.isEmpty()) {
             return QueryCouponsRespDTO.builder()
@@ -216,7 +215,7 @@ public class CouponQueryServiceImpl implements CouponQueryService {
      * 单线程版本，好理解一些。上面的多线程就是基于这个版本演进的
      */
     public QueryCouponsRespDTO listQueryUserCouponsBySync(QueryCouponsReqDTO requestParam) {
-        Set<String> rangeUserCoupons = stringRedisTemplate.opsForZSet().range(String.format(USER_COUPON_TEMPLATE_LIST_KEY, UserContext.getUserId()), 0, -1);
+        Set<String> rangeUserCoupons = findActiveUserCouponMembers();
 
         List<String> couponTemplateIds = rangeUserCoupons.stream()
                 .map(each -> StrUtil.split(each, "_").get(0))
@@ -322,5 +321,16 @@ public class CouponQueryServiceImpl implements CouponQueryService {
                 .availableCouponList(availableCouponList)
                 .notAvailableCouponList(notAvailableCouponList)
                 .build();
+    }
+
+    /**
+     * Redis ZSet 的 score 固化为用户券 validEndTime（毫秒）。查询不访问 MySQL：
+     * 仅取 score 严格大于当前时间的成员，不在查询热路径执行删除写操作。
+     * 即使延迟 MQ 暂时不可用，过期券也不会再被展示或参与结算。
+     */
+    private Set<String> findActiveUserCouponMembers() {
+        String key = String.format(USER_COUPON_TEMPLATE_LIST_KEY, UserContext.getUserId());
+        long now = System.currentTimeMillis();
+        return stringRedisTemplate.opsForZSet().rangeByScore(key, now + 1D, Double.POSITIVE_INFINITY);
     }
 }

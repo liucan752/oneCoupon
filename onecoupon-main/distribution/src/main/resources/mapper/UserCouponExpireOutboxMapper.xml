@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.nageoffer.onecoupon.distribution.dao.mapper.UserCouponExpireOutboxMapper">
+    <insert id="insertIgnoreBatch">
+        INSERT IGNORE INTO t_user_coupon_expire_outbox
+        (id,user_coupon_id,user_id,coupon_template_id,valid_end_time,event_type,status,retry_at,attempts,
+         worker_id,lease_until,last_error,create_time,update_time)
+        VALUES
+        <foreach collection="events" item="event" separator=",">
+            (#{event.id},#{event.userCouponId},#{event.userId},#{event.couponTemplateId},#{event.validEndTime},
+             #{event.eventType},#{event.status},#{event.retryAt},#{event.attempts},#{event.workerId},#{event.leaseUntil},
+             #{event.lastError},#{event.createTime},#{event.updateTime})
+        </foreach>
+    </insert>
+</mapper>

@@ -58,4 +58,41 @@
         AND b.receive_count > a.receive_count
         ) = 0;
     </select>
+
+    <select id="selectExistingUserIds" resultType="long">
+        SELECT DISTINCT user_id
+        FROM t_user_coupon
+        WHERE coupon_template_id = #{couponTemplateId}
+          AND receive_count = 1
+          AND user_id IN
+        <foreach item="userId" collection="userIds" open="(" separator="," close=")">
+            #{userId}
+        </foreach>
+    </select>
+
+    <insert id="insertIgnoreBatch">
+        INSERT IGNORE INTO t_user_coupon
+        (id, user_id, coupon_template_id, receive_time, receive_count, valid_start_time, valid_end_time,
+         source, status, create_time, update_time, del_flag)
+        VALUES
+        <foreach collection="coupons" item="coupon" separator=",">
+            (#{coupon.id}, #{coupon.userId}, #{coupon.couponTemplateId}, #{coupon.receiveTime},
+             #{coupon.receiveCount}, #{coupon.validStartTime}, #{coupon.validEndTime}, #{coupon.source},
+             #{coupon.status}, #{coupon.createTime}, #{coupon.updateTime}, #{coupon.delFlag})
+        </foreach>
+    </insert>
+
+    <select id="selectExistingCouponIds" resultType="long">
+        SELECT id
+        FROM t_user_coupon
+        WHERE coupon_template_id = #{couponTemplateId}
+          AND user_id IN
+        <foreach item="userId" collection="userIds" open="(" separator="," close=")">
+            #{userId}
+        </foreach>
+          AND id IN
+        <foreach item="couponId" collection="couponIds" open="(" separator="," close=")">
+            #{couponId}
+        </foreach>
+    </select>
 </mapper>

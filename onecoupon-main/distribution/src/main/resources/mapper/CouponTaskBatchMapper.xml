@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.nageoffer.onecoupon.distribution.dao.mapper.CouponTaskBatchMapper">
+
+    <!--
+      租约 CAS 的核心：多个服务实例即使同时收到同一条 RocketMQ 消息，只有 affectedRows=1 的实例能继续。
+      已过期租约可被接管，避免消费者 JVM 崩溃后批次永久卡在 PROCESSING。
+    -->
+    <update id="claim">
+        UPDATE t_coupon_task_batch
+        SET status = 1,
+            lease_owner = #{owner},
+            lease_expire_time = #{leaseExpireTime},
+            update_time = NOW()
+        WHERE id = #{batchId}
+          AND shop_number = #{shopNumber}
+          AND (
+              status = 0
+              OR (status = 1 AND lease_expire_time &lt; NOW())
+          )
+    </update>
+
+    <select id="selectForUpdate" resultType="com.nageoffer.onecoupon.distribution.dao.entity.CouponTaskBatchDO">
+        SELECT id, task_id, shop_number, coupon_template_id, batch_no, expected_count,
+               success_count, fail_count, status, lease_owner, lease_expire_time, create_time, update_time
+        FROM t_coupon_task_batch
+        WHERE id = #{batchId}
+          AND shop_number = #{shopNumber}
+        FOR UPDATE
+    </select>
+
+    <select id="selectByIdAndShopNumber" resultType="com.nageoffer.onecoupon.distribution.dao.entity.CouponTaskBatchDO">
+        SELECT id, task_id, shop_number, coupon_template_id, batch_no, expected_count,
+               success_count, fail_count, status, lease_owner, lease_expire_time, create_time, update_time
+        FROM t_coupon_task_batch
+        WHERE id = #{batchId} AND shop_number = #{shopNumber}
+    </select>
+
+    <select id="selectByTaskIdAndBatchNo" resultType="com.nageoffer.onecoupon.distribution.dao.entity.CouponTaskBatchDO">
+        SELECT id, task_id, shop_number, coupon_template_id, batch_no, expected_count,
+               success_count, fail_count, status, lease_owner, lease_expire_time, create_time, update_time
+        FROM t_coupon_task_batch
+        WHERE task_id = #{taskId}
+          AND shop_number = #{shopNumber}
+          AND batch_no = #{batchNo}
+        LIMIT 1
+    </select>
+
+    <update id="markSuccess">
+        UPDATE t_coupon_task_batch
+        SET status = 2,
+            success_count = #{successCount},
+            fail_count = #{failCount},
+            lease_owner = NULL,
+            lease_expire_time = NULL,
+            update_time = NOW()
+        WHERE id = #{batchId}
+          AND shop_number = #{shopNumber}
+          AND status = 1
+          AND lease_owner = #{owner}
+    </update>
+
+    <update id="markFailed">
+        UPDATE t_coupon_task_batch
+        SET status = 3,
+            lease_owner = NULL,
+            lease_expire_time = NULL,
+            update_time = NOW()
+        WHERE id = #{batchId}
+          AND shop_number = #{shopNumber}
+          AND status = 1
+          AND lease_owner = #{owner}
+    </update>
+
+    <select id="countUnfinishedByTaskId" resultType="int">
+        SELECT COUNT(1)
+        FROM t_coupon_task_batch
+        WHERE task_id = #{taskId}
+          AND shop_number = #{shopNumber}
+          AND status IN (0, 1)
+    </select>
+</mapper>

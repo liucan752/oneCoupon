@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.nageoffer.onecoupon.distribution.dao.mapper.CouponTaskItemMapper">
+
+    <!--
+      (task_id,row_num) 是 Excel 重放幂等键。INSERT IGNORE 只忽略这个确定的重复，
+      不把异常吞掉到业务代码中；调用方仍应监控 warning/插入行数。
+    -->
+    <insert id="insertIgnoreBatch">
+        INSERT IGNORE INTO t_coupon_task_item
+        (id, task_id, batch_id, shop_number, row_num, user_id, phone, mail, status, create_time, update_time)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{item.id}, #{item.taskId}, #{item.batchId}, #{item.shopNumber}, #{item.rowNum}, #{item.userId},
+             #{item.phone}, #{item.mail}, #{item.status}, NOW(), NOW())
+        </foreach>
+    </insert>
+
+    <!-- 不需要 SELECT ... FOR UPDATE：批次的 claim 已经是唯一执行权；这里按行号固定处理顺序。 -->
+    <select id="selectPendingByBatchId" resultType="com.nageoffer.onecoupon.distribution.dao.entity.CouponTaskItemDO">
+        SELECT id, task_id, batch_id, shop_number, row_num, user_id, phone, mail, status, coupon_id, fail_reason, create_time, update_time
+        FROM t_coupon_task_item
+        WHERE batch_id = #{batchId}
+          AND shop_number = #{shopNumber}
+          AND status = 0
+        ORDER BY row_num ASC, id ASC
+    </select>
+
+    <!--
+      coupon_id 必须和任务明细一起落库：即便 MQ ACK 丢失导致整批重放，也可由终态明细识别已完成，
+      不会再为同一 Excel 行生成第二张券。
+    -->
+    <update id="markSuccess">
+        UPDATE t_coupon_task_item
+        SET status = 2,
+            fail_reason = NULL,
+            coupon_id = CASE id
+            <foreach collection="items" item="item">
+                WHEN #{item.id} THEN #{item.couponId}
+            </foreach>
+            END,
+            update_time = NOW()
+        WHERE batch_id = #{batchId}
+          AND shop_number = #{shopNumber}
+          AND status = 0
+          AND id IN
+        <foreach collection="items" item="item" open="(" separator="," close=")">
+            #{item.id}
+        </foreach>
+    </update>
+
+    <update id="markFailed">
+        UPDATE t_coupon_task_item
+        SET status = 3,
+            fail_reason = #{reason},
+            update_time = NOW()
+        WHERE batch_id = #{batchId}
+          AND shop_number = #{shopNumber}
+          AND status = 0
+          AND id IN
+        <foreach collection="itemIds" item="itemId" open="(" separator="," close=")">
+            #{itemId}
+        </foreach>
+    </update>
+
+    <select id="countByBatchIdAndStatus" resultType="int">
+        SELECT COUNT(1)
+        FROM t_coupon_task_item
+        WHERE batch_id = #{batchId}
+          AND shop_number = #{shopNumber}
+          AND status = #{status}
+    </select>
+</mapper>
