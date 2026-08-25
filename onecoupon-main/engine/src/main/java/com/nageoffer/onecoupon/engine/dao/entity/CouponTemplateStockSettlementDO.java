@@ -32,29 +32,31 @@
  * 本软件受到[山东流年网络科技有限公司]及其许可人的版权保护。
  */
 
-package com.nageoffer.onecoupon.engine.dao.mapper;
+package com.nageoffer.onecoupon.engine.dao.entity;
 
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.nageoffer.onecoupon.engine.dao.entity.UserCouponExpireOutboxDO;
-import org.apache.ibatis.annotations.Param;
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.Date;
-import java.util.List;
 
-public interface UserCouponExpireOutboxMapper extends BaseMapper<UserCouponExpireOutboxDO> {
-    int insertIgnore(UserCouponExpireOutboxDO outbox);
-    List<UserCouponExpireOutboxDO> selectReadyEvents(@Param("now") Date now, @Param("limit") int limit);
-    int claim(@Param("id") Long id, @Param("userId") Long userId,
-              @Param("workerId") String workerId, @Param("leaseUntil") Date leaseUntil);
-    int resetExpiredProcessing(@Param("now") Date now);
-    int markPublished(@Param("id") Long id, @Param("userId") Long userId,
-                      @Param("nextCheckAt") Date nextCheckAt, @Param("workerId") String workerId);
-    List<UserCouponExpireOutboxDO> selectPublishedForCheck(@Param("now") Date now, @Param("limit") int limit);
-    int markDoneFromPublished(@Param("id") Long id, @Param("userId") Long userId);
-    int requeuePublished(@Param("id") Long id, @Param("userId") Long userId, @Param("retryAt") Date retryAt);
-    int postponePublishedCheck(@Param("id") Long id, @Param("userId") Long userId,
-                               @Param("nextCheckAt") Date nextCheckAt);
-    int markRetry(@Param("id") Long id, @Param("userId") Long userId, @Param("workerId") String workerId,
-                  @Param("retryAt") Date retryAt, @Param("attempts") int attempts,
-                  @Param("lastError") String lastError);
+/**
+ * 模板分片上的库存收敛去重账本。主键复用用户分片记账 ID，防止批量任务崩溃重试重复扣库存。
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@TableName("t_coupon_template_stock_settlement")
+public class CouponTemplateStockSettlementDO {
+    private Long id;
+    private Long shopNumber;
+    private Long couponTemplateId;
+    private Integer amount;
+    @TableField(fill = FieldFill.INSERT)
+    private Date createTime;
 }

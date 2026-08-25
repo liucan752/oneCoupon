@@ -63,6 +63,9 @@ public final class EngineRedisConstant {
      */
     public static final String USER_COUPON_TEMPLATE_LIMIT_KEY = "one-coupon_engine:user-template-limit:%s_%s";
 
+    /** 领券 Outbox 对应的 Redis 预扣结果，保证 Outbox 重试不会重复扣库存。 */
+    public static final String USER_COUPON_REDEEM_RESERVATION_KEY = "one-coupon_engine:redeem-reservation:%s";
+
     /**
      * 用户已领取优惠券列表模板 Key
      */

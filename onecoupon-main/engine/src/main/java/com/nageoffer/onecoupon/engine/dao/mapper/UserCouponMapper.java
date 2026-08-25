@@ -36,6 +36,7 @@ package com.nageoffer.onecoupon.engine.dao.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.nageoffer.onecoupon.engine.dao.entity.UserCouponDO;
+import org.apache.ibatis.annotations.Param;
 
 /**
  * 用户优惠券数据库持久层
@@ -45,4 +46,8 @@ import com.nageoffer.onecoupon.engine.dao.entity.UserCouponDO;
  * 开发时间：2024-07-17
  */
 public interface UserCouponMapper extends BaseMapper<UserCouponDO> {
+    int insertIgnore(UserCouponDO userCoupon);
+    UserCouponDO selectByUserTemplateReceiveCount(@Param("userId") Long userId,
+                                                   @Param("couponTemplateId") Long couponTemplateId,
+                                                   @Param("receiveCount") Integer receiveCount);
 }

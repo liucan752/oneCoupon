@@ -32,29 +32,41 @@
  * 本软件受到[山东流年网络科技有限公司]及其许可人的版权保护。
  */
 
-package com.nageoffer.onecoupon.engine.dao.mapper;
+package com.nageoffer.onecoupon.engine.dao.entity;
 
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.nageoffer.onecoupon.engine.dao.entity.UserCouponExpireOutboxDO;
-import org.apache.ibatis.annotations.Param;
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.Date;
-import java.util.List;
 
-public interface UserCouponExpireOutboxMapper extends BaseMapper<UserCouponExpireOutboxDO> {
-    int insertIgnore(UserCouponExpireOutboxDO outbox);
-    List<UserCouponExpireOutboxDO> selectReadyEvents(@Param("now") Date now, @Param("limit") int limit);
-    int claim(@Param("id") Long id, @Param("userId") Long userId,
-              @Param("workerId") String workerId, @Param("leaseUntil") Date leaseUntil);
-    int resetExpiredProcessing(@Param("now") Date now);
-    int markPublished(@Param("id") Long id, @Param("userId") Long userId,
-                      @Param("nextCheckAt") Date nextCheckAt, @Param("workerId") String workerId);
-    List<UserCouponExpireOutboxDO> selectPublishedForCheck(@Param("now") Date now, @Param("limit") int limit);
-    int markDoneFromPublished(@Param("id") Long id, @Param("userId") Long userId);
-    int requeuePublished(@Param("id") Long id, @Param("userId") Long userId, @Param("retryAt") Date retryAt);
-    int postponePublishedCheck(@Param("id") Long id, @Param("userId") Long userId,
-                               @Param("nextCheckAt") Date nextCheckAt);
-    int markRetry(@Param("id") Long id, @Param("userId") Long userId, @Param("workerId") String workerId,
-                  @Param("retryAt") Date retryAt, @Param("attempts") int attempts,
-                  @Param("lastError") String lastError);
+/**
+ * 已成功发券、尚待收敛模板 MySQL 库存的记账记录。按 userId 与用户券同分片。
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@TableName("t_user_coupon_redeem_stock_ledger")
+public class UserCouponRedeemStockLedgerDO {
+    private Long id;
+    private Long outboxId;
+    private Long userId;
+    private Long shopNumber;
+    private Long couponTemplateId;
+    private Integer amount;
+    private String status;
+    private Date retryAt;
+    private Integer attempts;
+    private String workerId;
+    private Date leaseUntil;
+    private String lastError;
+    @TableField(fill = FieldFill.INSERT)
+    private Date createTime;
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    private Date updateTime;
 }

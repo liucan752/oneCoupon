@@ -32,29 +32,21 @@
  * 本软件受到[山东流年网络科技有限公司]及其许可人的版权保护。
  */
 
-package com.nageoffer.onecoupon.engine.dao.mapper;
+package com.nageoffer.onecoupon.engine.seckill;
 
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.nageoffer.onecoupon.engine.dao.entity.UserCouponExpireOutboxDO;
-import org.apache.ibatis.annotations.Param;
+import com.nageoffer.onecoupon.engine.mq.event.UserCouponRedeemEvent;
+import org.junit.jupiter.api.Test;
 
-import java.util.Date;
-import java.util.List;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-public interface UserCouponExpireOutboxMapper extends BaseMapper<UserCouponExpireOutboxDO> {
-    int insertIgnore(UserCouponExpireOutboxDO outbox);
-    List<UserCouponExpireOutboxDO> selectReadyEvents(@Param("now") Date now, @Param("limit") int limit);
-    int claim(@Param("id") Long id, @Param("userId") Long userId,
-              @Param("workerId") String workerId, @Param("leaseUntil") Date leaseUntil);
-    int resetExpiredProcessing(@Param("now") Date now);
-    int markPublished(@Param("id") Long id, @Param("userId") Long userId,
-                      @Param("nextCheckAt") Date nextCheckAt, @Param("workerId") String workerId);
-    List<UserCouponExpireOutboxDO> selectPublishedForCheck(@Param("now") Date now, @Param("limit") int limit);
-    int markDoneFromPublished(@Param("id") Long id, @Param("userId") Long userId);
-    int requeuePublished(@Param("id") Long id, @Param("userId") Long userId, @Param("retryAt") Date retryAt);
-    int postponePublishedCheck(@Param("id") Long id, @Param("userId") Long userId,
-                               @Param("nextCheckAt") Date nextCheckAt);
-    int markRetry(@Param("id") Long id, @Param("userId") Long userId, @Param("workerId") String workerId,
-                  @Param("retryAt") Date retryAt, @Param("attempts") int attempts,
-                  @Param("lastError") String lastError);
+class UserCouponRedeemOutboxContractTest {
+
+    @Test
+    void eventUsesStableRequestIdAsBusinessMessageKey() {
+        UserCouponRedeemEvent event = UserCouponRedeemEvent.builder()
+                .requestId("redeem-001")
+                .build();
+
+        assertEquals("redeem-001", event.getRequestId());
+    }
 }

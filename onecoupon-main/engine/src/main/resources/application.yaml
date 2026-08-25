@@ -92,3 +92,13 @@ one-coupon:
     lease-seconds: 30
     published-check-seconds: 15
     fixed-delay-ms: 1000
+  user-coupon-redeem-outbox:
+    batch-size: 200
+    lease-seconds: 30
+    published-check-seconds: 15
+    init-recovery-seconds: 5
+    fixed-delay-ms: 1000
+  user-coupon-redeem-stock-settlement:
+    batch-size: 500
+    lease-seconds: 30
+    fixed-delay-ms: 1000

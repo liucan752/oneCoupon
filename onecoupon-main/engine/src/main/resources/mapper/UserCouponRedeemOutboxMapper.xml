@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.nageoffer.onecoupon.engine.dao.mapper.UserCouponRedeemOutboxMapper">
+    <resultMap id="OutboxMap" type="com.nageoffer.onecoupon.engine.dao.entity.UserCouponRedeemOutboxDO">
+        <id column="id" property="id"/><result column="user_id" property="userId"/>
+        <result column="request_id" property="requestId"/><result column="shop_number" property="shopNumber"/>
+        <result column="coupon_template_id" property="couponTemplateId"/><result column="source" property="source"/>
+        <result column="receive_count" property="receiveCount"/><result column="template_snapshot" property="templateSnapshot"/>
+        <result column="status" property="status"/><result column="retry_at" property="retryAt"/>
+        <result column="attempts" property="attempts"/><result column="worker_id" property="workerId"/>
+        <result column="lease_until" property="leaseUntil"/><result column="last_error" property="lastError"/>
+        <result column="create_time" property="createTime"/><result column="update_time" property="updateTime"/>
+    </resultMap>
+    <insert id="insertIgnore">
+        INSERT IGNORE INTO t_user_coupon_redeem_outbox
+        (id,user_id,request_id,shop_number,coupon_template_id,source,receive_count,template_snapshot,status,retry_at,attempts,
+         worker_id,lease_until,last_error,create_time,update_time)
+        VALUES (#{id},#{userId},#{requestId},#{shopNumber},#{couponTemplateId},#{source},#{receiveCount},#{templateSnapshot},#{status},#{retryAt},#{attempts},
+                #{workerId},#{leaseUntil},#{lastError},#{createTime},#{updateTime})
+    </insert>
+    <select id="selectByUserIdAndRequestId" resultMap="OutboxMap">
+        SELECT id,user_id,request_id,shop_number,coupon_template_id,source,receive_count,template_snapshot,status,retry_at,
+               attempts,worker_id,lease_until,last_error,create_time,update_time
+        FROM t_user_coupon_redeem_outbox WHERE user_id=#{userId} AND request_id=#{requestId}
+    </select>
+    <select id="selectByIdAndUserId" resultMap="OutboxMap">
+        SELECT id,user_id,request_id,shop_number,coupon_template_id,source,receive_count,template_snapshot,status,retry_at,
+               attempts,worker_id,lease_until,last_error,create_time,update_time
+        FROM t_user_coupon_redeem_outbox WHERE id=#{id} AND user_id=#{userId}
+    </select>
+    <select id="selectReadyEvents" resultMap="OutboxMap">
+        SELECT id,user_id,request_id,shop_number,coupon_template_id,source,receive_count,template_snapshot,status,retry_at,
+               attempts,worker_id,lease_until,last_error,create_time,update_time
+        FROM t_user_coupon_redeem_outbox
+        WHERE status='NEW' OR (status='RETRY' AND retry_at &lt;= #{now}) ORDER BY id ASC LIMIT #{limit}
+    </select>
+    <select id="selectPublishedForCheck" resultMap="OutboxMap">
+        SELECT id,user_id,request_id,shop_number,coupon_template_id,source,receive_count,template_snapshot,status,retry_at,
+               attempts,worker_id,lease_until,last_error,create_time,update_time
+        FROM t_user_coupon_redeem_outbox
+        WHERE status='PUBLISHED' AND retry_at &lt;= #{now} ORDER BY id ASC LIMIT #{limit}
+    </select>
+    <select id="selectStaleInitEvents" resultMap="OutboxMap">
+        SELECT id,user_id,request_id,shop_number,coupon_template_id,source,receive_count,template_snapshot,status,retry_at,
+               attempts,worker_id,lease_until,last_error,create_time,update_time
+        FROM t_user_coupon_redeem_outbox
+        WHERE status='INIT' AND create_time &lt;= #{now} ORDER BY id ASC LIMIT #{limit}
+    </select>
+    <update id="markReady">
+        UPDATE t_user_coupon_redeem_outbox SET status='NEW',receive_count=#{receiveCount},retry_at=NOW(),update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status='INIT'
+    </update>
+    <update id="markFailed">
+        UPDATE t_user_coupon_redeem_outbox SET status='FAILED',last_error=#{lastError},update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status='INIT'
+    </update>
+    <update id="claim">
+        UPDATE t_user_coupon_redeem_outbox SET status='PROCESSING',worker_id=#{workerId},lease_until=#{leaseUntil},update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status IN ('NEW','RETRY')
+    </update>
+    <update id="resetExpiredProcessing">
+        UPDATE t_user_coupon_redeem_outbox SET status='RETRY',retry_at=#{now},worker_id=NULL,lease_until=NULL,update_time=NOW()
+        WHERE status='PROCESSING' AND lease_until &lt; #{now}
+    </update>
+    <update id="markPublished">
+        UPDATE t_user_coupon_redeem_outbox SET status='PUBLISHED',retry_at=#{nextCheckAt},worker_id=NULL,lease_until=NULL,update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status='PROCESSING' AND worker_id=#{workerId}
+    </update>
+    <update id="markDone">
+        UPDATE t_user_coupon_redeem_outbox SET status='DONE',worker_id=NULL,lease_until=NULL,update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status IN ('PROCESSING','PUBLISHED')
+    </update>
+    <update id="requeuePublished">
+        UPDATE t_user_coupon_redeem_outbox SET status='RETRY',retry_at=#{retryAt},worker_id=NULL,lease_until=NULL,update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status='PUBLISHED'
+    </update>
+    <update id="postponePublishedCheck">
+        UPDATE t_user_coupon_redeem_outbox SET retry_at=#{nextCheckAt},update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status='PUBLISHED'
+    </update>
+    <update id="markRetry">
+        UPDATE t_user_coupon_redeem_outbox SET status='RETRY',retry_at=#{retryAt},attempts=#{attempts},last_error=#{lastError},
+            worker_id=NULL,lease_until=NULL,update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status='PROCESSING' AND worker_id=#{workerId}
+    </update>
+</mapper>

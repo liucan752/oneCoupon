@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.nageoffer.onecoupon.engine.dao.mapper.CouponTemplateStockSettlementMapper">
+    <insert id="insertIgnoreBatch">
+        INSERT IGNORE INTO t_coupon_template_stock_settlement (id,shop_number,coupon_template_id,amount,create_time)
+        VALUES
+        <foreach collection="records" item="record" separator=",">
+            (#{record.id},#{record.shopNumber},#{record.couponTemplateId},#{record.amount},#{record.createTime})
+        </foreach>
+    </insert>
+</mapper>

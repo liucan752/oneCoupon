@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.nageoffer.onecoupon.engine.dao.mapper.UserCouponRedeemStockLedgerMapper">
+    <resultMap id="LedgerMap" type="com.nageoffer.onecoupon.engine.dao.entity.UserCouponRedeemStockLedgerDO">
+        <id column="id" property="id"/><result column="outbox_id" property="outboxId"/><result column="user_id" property="userId"/>
+        <result column="shop_number" property="shopNumber"/><result column="coupon_template_id" property="couponTemplateId"/>
+        <result column="amount" property="amount"/><result column="status" property="status"/><result column="retry_at" property="retryAt"/>
+        <result column="attempts" property="attempts"/><result column="worker_id" property="workerId"/><result column="lease_until" property="leaseUntil"/>
+        <result column="last_error" property="lastError"/><result column="create_time" property="createTime"/><result column="update_time" property="updateTime"/>
+    </resultMap>
+    <insert id="insertIgnore">
+        INSERT IGNORE INTO t_user_coupon_redeem_stock_ledger
+        (id,outbox_id,user_id,shop_number,coupon_template_id,amount,status,retry_at,attempts,worker_id,lease_until,last_error,create_time,update_time)
+        VALUES (#{id},#{outboxId},#{userId},#{shopNumber},#{couponTemplateId},#{amount},#{status},#{retryAt},#{attempts},#{workerId},#{leaseUntil},#{lastError},#{createTime},#{updateTime})
+    </insert>
+    <select id="selectReadyEvents" resultMap="LedgerMap">
+        SELECT id,outbox_id,user_id,shop_number,coupon_template_id,amount,status,retry_at,attempts,worker_id,lease_until,last_error,create_time,update_time
+        FROM t_user_coupon_redeem_stock_ledger WHERE status='NEW' OR (status='RETRY' AND retry_at &lt;= #{now}) ORDER BY id ASC LIMIT #{limit}
+    </select>
+    <update id="claim">
+        UPDATE t_user_coupon_redeem_stock_ledger SET status='PROCESSING',worker_id=#{workerId},lease_until=#{leaseUntil},update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status IN ('NEW','RETRY')
+    </update>
+    <update id="resetExpiredProcessing">
+        UPDATE t_user_coupon_redeem_stock_ledger SET status='RETRY',retry_at=#{now},worker_id=NULL,lease_until=NULL,update_time=NOW()
+        WHERE status='PROCESSING' AND lease_until &lt; #{now}
+    </update>
+    <update id="markDone">
+        UPDATE t_user_coupon_redeem_stock_ledger SET status='DONE',worker_id=NULL,lease_until=NULL,update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status='PROCESSING' AND worker_id=#{workerId}
+    </update>
+    <update id="markRetry">
+        UPDATE t_user_coupon_redeem_stock_ledger SET status='RETRY',retry_at=#{retryAt},attempts=#{attempts},last_error=#{lastError},
+            worker_id=NULL,lease_until=NULL,update_time=NOW()
+        WHERE id=#{id} AND user_id=#{userId} AND status='PROCESSING' AND worker_id=#{workerId}
+    </update>
+</mapper>

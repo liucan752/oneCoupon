@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.nageoffer.onecoupon.engine.dao.mapper.UserCouponMapper">
+    <insert id="insertIgnore">
+        INSERT IGNORE INTO t_user_coupon
+        (id,user_id,coupon_template_id,receive_time,receive_count,valid_start_time,valid_end_time,use_time,source,status,create_time,update_time,del_flag)
+        VALUES (#{id},#{userId},#{couponTemplateId},#{receiveTime},#{receiveCount},#{validStartTime},#{validEndTime},#{useTime},#{source},#{status},#{createTime},#{updateTime},#{delFlag})
+    </insert>
+    <select id="selectByUserTemplateReceiveCount" resultType="com.nageoffer.onecoupon.engine.dao.entity.UserCouponDO">
+        SELECT id,user_id,coupon_template_id,receive_time,receive_count,valid_start_time,valid_end_time,use_time,source,status,create_time,update_time,del_flag
+        FROM t_user_coupon
+        WHERE user_id=#{userId} AND coupon_template_id=#{couponTemplateId} AND receive_count=#{receiveCount}
+        LIMIT 1
+    </select>
+</mapper>

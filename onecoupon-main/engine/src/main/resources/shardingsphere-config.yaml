@@ -78,6 +78,36 @@ rules:
           standard:
             shardingColumn: user_id
             shardingAlgorithmName: user_coupon_table_mod
+      t_user_coupon_redeem_outbox:
+        actualDataNodes: ds_${0..1}.t_user_coupon_redeem_outbox_${0..31}
+        databaseStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: user_coupon_database_mod
+        tableStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: user_coupon_table_mod
+      t_user_coupon_redeem_stock_ledger:
+        actualDataNodes: ds_${0..1}.t_user_coupon_redeem_stock_ledger_${0..31}
+        databaseStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: user_coupon_database_mod
+        tableStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: user_coupon_table_mod
+      t_coupon_template_stock_settlement:
+        actualDataNodes: ds_${0..1}.t_coupon_template_stock_settlement_${0..15}
+        databaseStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_database_mod
+        tableStrategy:
+          standard:
+            shardingColumn: shop_number
+            shardingAlgorithmName: coupon_template_table_mod
       t_coupon_settlement:
         actualDataNodes: ds_${0..1}.t_coupon_settlement_${0..15}
         databaseStrategy:

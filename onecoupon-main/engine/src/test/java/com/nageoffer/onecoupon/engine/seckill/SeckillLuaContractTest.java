@@ -32,29 +32,24 @@
  * 本软件受到[山东流年网络科技有限公司]及其许可人的版权保护。
  */
 
-package com.nageoffer.onecoupon.engine.dao.mapper;
+package com.nageoffer.onecoupon.engine.seckill;
 
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.nageoffer.onecoupon.engine.dao.entity.UserCouponExpireOutboxDO;
-import org.apache.ibatis.annotations.Param;
+import org.junit.jupiter.api.Test;
 
-import java.util.Date;
-import java.util.List;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
-public interface UserCouponExpireOutboxMapper extends BaseMapper<UserCouponExpireOutboxDO> {
-    int insertIgnore(UserCouponExpireOutboxDO outbox);
-    List<UserCouponExpireOutboxDO> selectReadyEvents(@Param("now") Date now, @Param("limit") int limit);
-    int claim(@Param("id") Long id, @Param("userId") Long userId,
-              @Param("workerId") String workerId, @Param("leaseUntil") Date leaseUntil);
-    int resetExpiredProcessing(@Param("now") Date now);
-    int markPublished(@Param("id") Long id, @Param("userId") Long userId,
-                      @Param("nextCheckAt") Date nextCheckAt, @Param("workerId") String workerId);
-    List<UserCouponExpireOutboxDO> selectPublishedForCheck(@Param("now") Date now, @Param("limit") int limit);
-    int markDoneFromPublished(@Param("id") Long id, @Param("userId") Long userId);
-    int requeuePublished(@Param("id") Long id, @Param("userId") Long userId, @Param("retryAt") Date retryAt);
-    int postponePublishedCheck(@Param("id") Long id, @Param("userId") Long userId,
-                               @Param("nextCheckAt") Date nextCheckAt);
-    int markRetry(@Param("id") Long id, @Param("userId") Long userId, @Param("workerId") String workerId,
-                  @Param("retryAt") Date retryAt, @Param("attempts") int attempts,
-                  @Param("lastError") String lastError);
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class SeckillLuaContractTest {
+
+    @Test
+    void reservationUsesAbsoluteExpiryAndReturnsIncrementedReceiveCount() throws IOException {
+        String script = Files.readString(Path.of("src/main/resources/lua/stock_decrement_and_save_user_receive.lua"), StandardCharsets.UTF_8);
+
+        assertTrue(script.contains("EXPIREAT"), "限领 Key 必须按活动结束时间使用 EXPIREAT");
+        assertTrue(script.contains("userCouponCount + 1"), "Lua 返回的领取次数必须是递增后的次数");
+    }
 }

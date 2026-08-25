@@ -47,8 +47,6 @@ import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
 
-import java.util.UUID;
-
 /**
  * 用户兑换优惠券消息生产者
  * <p>
@@ -70,7 +68,7 @@ public class UserCouponRedeemProducer extends AbstractCommonSendProduceTemplate<
     protected BaseSendExtendDTO buildBaseSendExtendParam(UserCouponRedeemEvent messageSendEvent) {
         return BaseSendExtendDTO.builder()
                 .eventName("用户兑换优惠券")
-                .keys(UUID.randomUUID().toString())
+                .keys(messageSendEvent.getRequestId())
                 .topic(environment.resolvePlaceholders(EngineRockerMQConstant.COUPON_TEMPLATE_REDEEM_TOPIC_KEY))
                 .sentTimeout(2000L)
                 .build();
@@ -78,7 +76,7 @@ public class UserCouponRedeemProducer extends AbstractCommonSendProduceTemplate<
 
     @Override
     protected Message<?> buildMessage(UserCouponRedeemEvent messageSendEvent, BaseSendExtendDTO requestParam) {
-        String keys = StrUtil.isEmpty(requestParam.getKeys()) ? UUID.randomUUID().toString() : requestParam.getKeys();
+        String keys = StrUtil.isEmpty(requestParam.getKeys()) ? messageSendEvent.getRequestId() : requestParam.getKeys();
         return MessageBuilder
                 .withPayload(new MessageWrapper(keys, messageSendEvent))
                 .setHeader(MessageConst.PROPERTY_KEYS, keys)
@@ -86,4 +84,3 @@ public class UserCouponRedeemProducer extends AbstractCommonSendProduceTemplate<
                 .build();
     }
 }
-

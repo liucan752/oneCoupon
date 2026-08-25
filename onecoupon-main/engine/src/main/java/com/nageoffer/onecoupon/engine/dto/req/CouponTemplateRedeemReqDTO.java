@@ -65,4 +65,10 @@ public class CouponTemplateRedeemReqDTO {
      */
     @Schema(description = "优惠券模板id", example = "1810966706881941507", required = true)
     private String couponTemplateId;
+
+    /**
+     * 领券请求幂等键。前端重试同一次请求时应复用该值；为空时由服务端生成。
+     */
+    @Schema(description = "领券请求幂等键", example = "redeem-20260825-001")
+    private String requestId;
 }

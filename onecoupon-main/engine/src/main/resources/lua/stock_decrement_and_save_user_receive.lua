@@ -3,8 +3,10 @@
 -- 参数列表：
 -- KEYS[1]: 优惠券库存键 (coupon_stock_key)
 -- KEYS[2]: 用户领取记录键 (user_coupon_key)
--- ARGV[1]: 优惠券有效期结束时间 (timestamp)
+-- KEYS[3]: 本次领券预扣结果键 (reservation_key)
+-- ARGV[1]: 优惠券有效期结束时间（Unix 秒）
 -- ARGV[2]: 用户领取上限 (limit)
+-- ARGV[3]: 预扣结果保留秒数
 
 local function combineFields(firstField, secondField)
     -- 确定 SECOND_FIELD_BITS 为 14，因为 secondField 最大为 9999
@@ -21,11 +23,17 @@ local function combineFields(firstField, secondField)
     return shiftedFirstField + secondField
 end
 
+-- Outbox 调度器重试时先读取本次请求已有结果，避免重复扣减。
+local reservation = redis.call('GET', KEYS[3])
+if reservation ~= false and reservation ~= nil then
+    return tonumber(reservation)
+end
+
 -- 获取当前库存
 local stock = tonumber(redis.call('HGET', KEYS[1], 'stock'))
 
 -- 判断库存是否大于 0
-if stock <= 0 then
+if stock == nil or stock <= 0 then
     return combineFields(1, 0) -- 库存不足
 end
 
@@ -42,11 +50,12 @@ if userCouponCount >= tonumber(ARGV[2]) then
     return combineFields(2, userCouponCount) -- 用户已经达到领取上限
 end
 
--- 增加用户领取的优惠券次数
-if userCouponCount == 0 then
+-- 增加用户领取的优惠券次数；返回值必须是递增后的次数。
+local nextReceiveCount = userCouponCount + 1
+if nextReceiveCount == 1 then
     -- 如果用户第一次领取，则需要添加过期时间
     redis.call('SET', KEYS[2], 1)
-    redis.call('EXPIRE', KEYS[2], ARGV[1])
+    redis.call('EXPIREAT', KEYS[2], ARGV[1])
 else
     -- 因为第一次领取已经设置了过期时间，第二次领取沿用之前即可
     redis.call('INCR', KEYS[2])
@@ -55,4 +64,6 @@ end
 -- 减少优惠券库存
 redis.call('HINCRBY', KEYS[1], 'stock', -1)
 
-return combineFields(0, userCouponCount)
+local result = combineFields(0, nextReceiveCount)
+redis.call('SET', KEYS[3], result, 'EX', math.max(1, tonumber(ARGV[3])))
+return result

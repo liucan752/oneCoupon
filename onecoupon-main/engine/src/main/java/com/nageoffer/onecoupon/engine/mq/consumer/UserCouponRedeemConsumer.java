@@ -38,14 +38,16 @@ import cn.hutool.core.date.DateTime;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.IdUtil;
 import com.alibaba.fastjson2.JSON;
-import com.baomidou.mybatisplus.extension.toolkit.SqlHelper;
 import com.nageoffer.onecoupon.engine.common.constant.EngineRockerMQConstant;
 import com.nageoffer.onecoupon.engine.common.enums.UserCouponStatusEnum;
 import com.nageoffer.onecoupon.engine.dao.entity.UserCouponDO;
 import com.nageoffer.onecoupon.engine.dao.entity.UserCouponExpireOutboxDO;
-import com.nageoffer.onecoupon.engine.dao.mapper.CouponTemplateMapper;
+import com.nageoffer.onecoupon.engine.dao.entity.UserCouponRedeemOutboxDO;
+import com.nageoffer.onecoupon.engine.dao.entity.UserCouponRedeemStockLedgerDO;
 import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponMapper;
 import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponExpireOutboxMapper;
+import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponRedeemOutboxMapper;
+import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponRedeemStockLedgerMapper;
 import com.nageoffer.onecoupon.engine.dto.req.CouponTemplateRedeemReqDTO;
 import com.nageoffer.onecoupon.engine.dto.resp.CouponTemplateQueryRespDTO;
 import com.nageoffer.onecoupon.engine.mq.base.MessageWrapper;
@@ -77,8 +79,9 @@ import java.util.Date;
 public class UserCouponRedeemConsumer implements RocketMQListener<MessageWrapper<UserCouponRedeemEvent>> {
 
     private final UserCouponMapper userCouponMapper;
-    private final CouponTemplateMapper couponTemplateMapper;
     private final UserCouponExpireOutboxMapper userCouponExpireOutboxMapper;
+    private final UserCouponRedeemOutboxMapper userCouponRedeemOutboxMapper;
+    private final UserCouponRedeemStockLedgerMapper userCouponRedeemStockLedgerMapper;
 
     @NoMQDuplicateConsume(
             keyPrefix = "user-coupon-redeem:",
@@ -94,10 +97,9 @@ public class UserCouponRedeemConsumer implements RocketMQListener<MessageWrapper
         CouponTemplateRedeemReqDTO requestParam = messageWrapper.getMessage().getRequestParam();
         CouponTemplateQueryRespDTO couponTemplate = messageWrapper.getMessage().getCouponTemplate();
         String userId = messageWrapper.getMessage().getUserId();
-
-        int decremented = couponTemplateMapper.decrementCouponTemplateStock(Long.parseLong(requestParam.getShopNumber()), Long.parseLong(requestParam.getCouponTemplateId()), 1L);
-        if (!SqlHelper.retBool(decremented)) {
-            log.warn("[消费者] 用户兑换优惠券 - 执行消费逻辑，扣减优惠券数据库库存失败，消息体：{}", JSON.toJSONString(messageWrapper));
+        Long outboxId = messageWrapper.getMessage().getOutboxId();
+        UserCouponRedeemOutboxDO outbox = userCouponRedeemOutboxMapper.selectByIdAndUserId(outboxId, Long.parseLong(userId));
+        if (outbox == null || "DONE".equals(outbox.getStatus())) {
             return;
         }
 
@@ -114,8 +116,15 @@ public class UserCouponRedeemConsumer implements RocketMQListener<MessageWrapper
                 .validStartTime(now)
                 .validEndTime(validEndTime)
                 .build();
-        userCouponMapper.insert(userCouponDO);
-        userCouponExpireOutboxMapper.insert(UserCouponExpireOutboxDO.builder()
+        int inserted = userCouponMapper.insertIgnore(userCouponDO);
+        if (inserted == 0) {
+            userCouponDO = userCouponMapper.selectByUserTemplateReceiveCount(
+                    Long.parseLong(userId), Long.parseLong(requestParam.getCouponTemplateId()), messageWrapper.getMessage().getReceiveCount());
+            if (userCouponDO == null) {
+                throw new IllegalStateException("用户券去重写入后未查询到记录，outboxId=" + outboxId);
+            }
+        }
+        userCouponExpireOutboxMapper.insertIgnore(UserCouponExpireOutboxDO.builder()
                 .id(IdUtil.getSnowflakeNextId())
                 .userCouponId(userCouponDO.getId())
                 .userId(userCouponDO.getUserId())
@@ -128,5 +137,14 @@ public class UserCouponRedeemConsumer implements RocketMQListener<MessageWrapper
                 .createTime(now)
                 .updateTime(now)
                 .build());
+        // Redis 已在入口原子预扣；这里仅写用户分片记账。独立批量任务会按模板聚合收敛 MySQL 库存，
+        // 避免每次领券都竞争同一 t_coupon_template 行。
+        userCouponRedeemStockLedgerMapper.insertIgnore(UserCouponRedeemStockLedgerDO.builder()
+                .id(IdUtil.getSnowflakeNextId()).outboxId(outboxId).userId(Long.parseLong(userId))
+                .shopNumber(Long.parseLong(requestParam.getShopNumber())).couponTemplateId(Long.parseLong(requestParam.getCouponTemplateId()))
+                .amount(1).status("NEW").retryAt(now).attempts(0).createTime(now).updateTime(now).build());
+        if (userCouponRedeemOutboxMapper.markDone(outboxId, Long.parseLong(userId)) != 1) {
+            throw new IllegalStateException("领券 Outbox 未处于可完成状态，outboxId=" + outboxId);
+        }
     }
 }

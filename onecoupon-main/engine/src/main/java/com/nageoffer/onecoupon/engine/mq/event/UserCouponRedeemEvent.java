@@ -55,6 +55,16 @@ import lombok.NoArgsConstructor;
 public class UserCouponRedeemEvent {
 
     /**
+     * Outbox 主键，便于消费者回写持久化状态。
+     */
+    private Long outboxId;
+
+    /**
+     * 业务幂等键，生产者消息 Keys 与该字段保持一致。
+     */
+    private String requestId;
+
+    /**
      * Web 请求参数
      */
     private CouponTemplateRedeemReqDTO requestParam;
