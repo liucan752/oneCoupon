@@ -47,6 +47,15 @@ import lombok.Data;
 @Data
 public class CouponProcessRefundReqDTO {
 
+    /** 订单 ID。 */
+    private Long orderId;
+
+    /** 退款业务流水号。Demo 默认全额退款并归还整张券。 */
+    private String refundId;
+
+    /** 退款事件幂等号。 */
+    private String requestId;
+
     /**
      * 优惠券ID
      */

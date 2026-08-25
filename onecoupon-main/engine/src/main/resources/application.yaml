@@ -102,3 +102,7 @@ one-coupon:
     batch-size: 500
     lease-seconds: 30
     fixed-delay-ms: 1000
+  user-coupon-settlement-projection-outbox:
+    batch-size: 200
+    lease-seconds: 30
+    fixed-delay-ms: 1000

@@ -78,6 +78,18 @@ public class CouponSettlementDO {
      */
     private Long couponId;
 
+    /** 创建结算请求幂等号。 */
+    private String requestId;
+
+    /** 支付业务流水号。 */
+    private String paymentId;
+
+    /** 退款业务流水号。 */
+    private String refundId;
+
+    /** 创建结算单时固化的优惠金额。 */
+    private java.math.BigDecimal discountAmount;
+
     /**
      * 结算单状态 0：锁定 1：已取消 2：已支付 3：已退款
      */

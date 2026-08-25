@@ -47,6 +47,15 @@ import lombok.Data;
 @Data
 public class CouponProcessPaymentReqDTO {
 
+    /** 订单 ID。 */
+    private Long orderId;
+
+    /** 支付业务流水号。Demo 中由调用方生成，用于重复消息幂等。 */
+    private String paymentId;
+
+    /** 支付事件幂等号。 */
+    private String requestId;
+
     /**
      * 优惠券ID
      */

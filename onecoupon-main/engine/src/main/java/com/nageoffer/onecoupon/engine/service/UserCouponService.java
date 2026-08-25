@@ -37,6 +37,7 @@ package com.nageoffer.onecoupon.engine.service;
 import com.nageoffer.onecoupon.engine.dto.req.CouponCreatePaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponProcessPaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponProcessRefundReqDTO;
+import com.nageoffer.onecoupon.engine.dto.req.CouponCancelPaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponTemplateRedeemReqDTO;
 
 /**
@@ -83,4 +84,7 @@ public interface UserCouponService {
      * @param requestParam 处理优惠券结算单退款请求参数
      */
     void processRefund(CouponProcessRefundReqDTO requestParam);
+
+    /** 订单取消或支付超时，释放锁定中的优惠券。 */
+    void cancelPayment(CouponCancelPaymentReqDTO requestParam);
 }

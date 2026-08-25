@@ -50,6 +50,9 @@ import java.util.List;
 @Data
 public class CouponCreatePaymentReqDTO {
 
+    /** 结算请求幂等号。 */
+    private String requestId;
+
     /**
      * 用户优惠券ID
      */

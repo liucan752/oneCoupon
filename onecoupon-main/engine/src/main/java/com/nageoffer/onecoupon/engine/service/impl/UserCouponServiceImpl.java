@@ -56,15 +56,18 @@ import com.nageoffer.onecoupon.engine.dao.entity.CouponSettlementDO;
 import com.nageoffer.onecoupon.engine.dao.entity.UserCouponDO;
 import com.nageoffer.onecoupon.engine.dao.entity.UserCouponExpireOutboxDO;
 import com.nageoffer.onecoupon.engine.dao.entity.UserCouponRedeemOutboxDO;
+import com.nageoffer.onecoupon.engine.dao.entity.UserCouponSettlementProjectionOutboxDO;
 import com.nageoffer.onecoupon.engine.dao.mapper.CouponSettlementMapper;
 import com.nageoffer.onecoupon.engine.dao.mapper.CouponTemplateMapper;
 import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponMapper;
 import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponExpireOutboxMapper;
 import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponRedeemOutboxMapper;
+import com.nageoffer.onecoupon.engine.dao.mapper.UserCouponSettlementProjectionOutboxMapper;
 import com.nageoffer.onecoupon.engine.dto.req.CouponCreatePaymentGoodsReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponCreatePaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponProcessPaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponProcessRefundReqDTO;
+import com.nageoffer.onecoupon.engine.dto.req.CouponCancelPaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponTemplateQueryReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponTemplateRedeemReqDTO;
 import com.nageoffer.onecoupon.engine.dto.resp.CouponTemplateQueryRespDTO;
@@ -89,6 +92,7 @@ import java.math.BigDecimal;
 import java.util.Date;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 import static com.nageoffer.onecoupon.engine.common.constant.EngineRedisConstant.USER_COUPON_TEMPLATE_LIST_KEY;
 
@@ -110,6 +114,7 @@ public class UserCouponServiceImpl implements UserCouponService {
     private final CouponSettlementMapper couponSettlementMapper;
     private final UserCouponExpireOutboxMapper userCouponExpireOutboxMapper;
     private final UserCouponRedeemOutboxMapper userCouponRedeemOutboxMapper;
+    private final UserCouponSettlementProjectionOutboxMapper userCouponSettlementProjectionOutboxMapper;
 
     private final StringRedisTemplate stringRedisTemplate;
     private final RedissonClient redissonClient;
@@ -193,6 +198,9 @@ public class UserCouponServiceImpl implements UserCouponService {
 
     @Override
     public void createPaymentRecord(CouponCreatePaymentReqDTO requestParam) {
+        if (requestParam.getOrderId() == null) {
+            throw new ClientException("订单号不能为空");
+        }
         RLock lock = redissonClient.getLock(String.format(EngineRedisConstant.LOCK_COUPON_SETTLEMENT_KEY, requestParam.getCouponId()));
         boolean tryLock = lock.tryLock();
         if (!tryLock) {
@@ -200,25 +208,38 @@ public class UserCouponServiceImpl implements UserCouponService {
         }
 
         try {
+            Long userId = Long.parseLong(UserContext.getUserId());
+            if (StrUtil.isBlank(requestParam.getRequestId())) {
+                throw new ClientException("结算请求幂等号不能为空");
+            }
+            String requestId = requestParam.getRequestId();
+            requestParam.setRequestId(requestId);
             LambdaQueryWrapper<CouponSettlementDO> queryWrapper = Wrappers.lambdaQuery(CouponSettlementDO.class)
                     .eq(CouponSettlementDO::getCouponId, requestParam.getCouponId())
-                    .eq(CouponSettlementDO::getUserId, Long.parseLong(UserContext.getUserId()))
-                    .in(CouponSettlementDO::getStatus, 0, 2);
+                    .eq(CouponSettlementDO::getUserId, userId)
+                    .eq(CouponSettlementDO::getOrderId, requestParam.getOrderId());
 
-            // 验证优惠券是否正在使用或者已经被使用
-            if (couponSettlementMapper.selectOne(queryWrapper) != null) {
-                throw new ClientException("请检查优惠券是否已使用");
+            CouponSettlementDO existingSettlement = couponSettlementMapper.selectOne(queryWrapper);
+            if (existingSettlement != null) {
+                if (Objects.equals(existingSettlement.getRequestId(), requestId)) {
+                    return;
+                }
+                throw new ClientException("订单优惠券结算单已存在");
             }
 
             UserCouponDO userCouponDO = userCouponMapper.selectOne(Wrappers.lambdaQuery(UserCouponDO.class)
                     .eq(UserCouponDO::getId, requestParam.getCouponId())
-                    .eq(UserCouponDO::getUserId, Long.parseLong(UserContext.getUserId())));
+                    .eq(UserCouponDO::getUserId, userId));
 
             // 验证用户优惠券状态和有效性
             if (Objects.isNull(userCouponDO)) {
                 throw new ClientException("优惠券不存在");
             }
-            if (userCouponDO.getValidEndTime().before(new Date())) {
+            Date now = new Date();
+            if (userCouponDO.getValidStartTime() != null && userCouponDO.getValidStartTime().after(now)) {
+                throw new ClientException("优惠券尚未生效");
+            }
+            if (userCouponDO.getValidEndTime() == null || !userCouponDO.getValidEndTime().after(now)) {
                 throw new ClientException("优惠券已过期");
             }
             if (userCouponDO.getStatus() != 0) {
@@ -247,7 +268,7 @@ public class UserCouponServiceImpl implements UserCouponService {
                 // 验证折扣金额
                 CouponCreatePaymentGoodsReqDTO paymentGoods = matchedGoods.get();
                 BigDecimal maximumDiscountAmount = consumeRule.getBigDecimal("maximumDiscountAmount");
-                if (!paymentGoods.getGoodsAmount().subtract(maximumDiscountAmount).equals(paymentGoods.getGoodsPayableAmount())) {
+                if (paymentGoods.getGoodsAmount().subtract(maximumDiscountAmount).compareTo(paymentGoods.getGoodsPayableAmount()) != 0) {
                     throw new ClientException("商品折扣后金额异常");
                 }
 
@@ -297,7 +318,9 @@ public class UserCouponServiceImpl implements UserCouponService {
                     CouponSettlementDO couponSettlementDO = CouponSettlementDO.builder()
                             .orderId(requestParam.getOrderId())
                             .couponId(requestParam.getCouponId())
-                            .userId(Long.parseLong(UserContext.getUserId()))
+                            .userId(userId)
+                            .requestId(requestId)
+                            .discountAmount(discountAmount)
                             .status(0)
                             .build();
                     couponSettlementMapper.insert(couponSettlementDO);
@@ -305,12 +328,19 @@ public class UserCouponServiceImpl implements UserCouponService {
                     // 变更用户优惠券状态
                     LambdaUpdateWrapper<UserCouponDO> userCouponUpdateWrapper = Wrappers.lambdaUpdate(UserCouponDO.class)
                             .eq(UserCouponDO::getId, requestParam.getCouponId())
-                            .eq(UserCouponDO::getUserId, Long.parseLong(UserContext.getUserId()))
+                            .eq(UserCouponDO::getUserId, userId)
                             .eq(UserCouponDO::getStatus, UserCouponStatusEnum.UNUSED.getCode());
                     UserCouponDO updateUserCouponDO = UserCouponDO.builder()
                             .status(UserCouponStatusEnum.LOCKING.getCode())
                             .build();
-                    userCouponMapper.update(updateUserCouponDO, userCouponUpdateWrapper);
+                    if (userCouponMapper.update(updateUserCouponDO, userCouponUpdateWrapper) != 1) {
+                        throw new ServiceException("用户优惠券状态更新失败");
+                    }
+                    userCouponSettlementProjectionOutboxMapper.insertIgnore(UserCouponSettlementProjectionOutboxDO.builder()
+                            .id(IdUtil.getSnowflakeNextId()).userId(userId).couponId(userCouponDO.getId())
+                            .couponTemplateId(userCouponDO.getCouponTemplateId()).action("REMOVE")
+                            .requestId(requestId + ":LOCK").validEndTime(userCouponDO.getValidEndTime())
+                            .status("NEW").attempts(0).retryAt(new Date()).createTime(new Date()).updateTime(new Date()).build());
                 } catch (Exception ex) {
                     log.error("创建优惠券结算单失败", ex);
                     status.setRollbackOnly();
@@ -318,68 +348,62 @@ public class UserCouponServiceImpl implements UserCouponService {
                 }
             });
 
-            // 从用户可用优惠券列表中删除优惠券
-            String userCouponItemCacheKey = StrUtil.builder()
-                    .append(userCouponDO.getCouponTemplateId())
-                    .append("_")
-                    .append(userCouponDO.getId())
-                    .toString();
-            stringRedisTemplate.opsForZSet().remove(String.format(USER_COUPON_TEMPLATE_LIST_KEY, UserContext.getUserId()), userCouponItemCacheKey);
+            // 缓存投影由本地事务中写入的 Outbox 异步收敛。
         } finally {
-            lock.unlock();
+            unlockSafely(lock);
         }
     }
 
     @Override
     public void processPayment(CouponProcessPaymentReqDTO requestParam) {
+        if (requestParam.getOrderId() == null || StrUtil.isBlank(requestParam.getPaymentId())) {
+            throw new ClientException("订单号和支付流水号不能为空");
+        }
         RLock lock = redissonClient.getLock(String.format(EngineRedisConstant.LOCK_COUPON_SETTLEMENT_KEY, requestParam.getCouponId()));
         boolean tryLock = lock.tryLock();
         if (!tryLock) {
             throw new ClientException("正在核销优惠券结算单，请稍候再试");
         }
 
-        // 通过编程式事务减小事务范围
-        transactionTemplate.executeWithoutResult(status -> {
-            try {
-                // 变更优惠券结算单状态为已支付
-                LambdaUpdateWrapper<CouponSettlementDO> couponSettlementUpdateWrapper = Wrappers.lambdaUpdate(CouponSettlementDO.class)
-                        .eq(CouponSettlementDO::getCouponId, requestParam.getCouponId())
-                        .eq(CouponSettlementDO::getUserId, Long.parseLong(UserContext.getUserId()))
-                        .eq(CouponSettlementDO::getStatus, 0);
-                CouponSettlementDO couponSettlementDO = CouponSettlementDO.builder()
-                        .status(2)
-                        .build();
-                int couponSettlementUpdated = couponSettlementMapper.update(couponSettlementDO, couponSettlementUpdateWrapper);
-                if (!SqlHelper.retBool(couponSettlementUpdated)) {
-                    log.error("核销优惠券结算单异常，请求参数：{}", com.alibaba.fastjson.JSON.toJSONString(requestParam));
-                    throw new ServiceException("核销优惠券结算单异常");
+        try {
+            Long userId = Long.parseLong(UserContext.getUserId());
+            CouponSettlementDO settlement = findSettlement(userId, requestParam.getCouponId(), requestParam.getOrderId());
+            UserCouponDO coupon = findUserCoupon(userId, requestParam.getCouponId());
+            switch (com.nageoffer.onecoupon.engine.service.settlement.CouponSettlementStateMachine.payment(
+                    settlement.getStatus(), coupon.getStatus(), settlement.getPaymentId(), requestParam.getPaymentId())) {
+                case IDEMPOTENT -> {
+                    return;
                 }
-
-                // 变更用户优惠券状态
-                LambdaUpdateWrapper<UserCouponDO> userCouponUpdateWrapper = Wrappers.lambdaUpdate(UserCouponDO.class)
-                        .eq(UserCouponDO::getId, requestParam.getCouponId())
-                        .eq(UserCouponDO::getUserId, Long.parseLong(UserContext.getUserId()))
-                        .eq(UserCouponDO::getStatus, UserCouponStatusEnum.LOCKING.getCode());
-                UserCouponDO userCouponDO = UserCouponDO.builder()
-                        .status(UserCouponStatusEnum.USED.getCode())
-                        .build();
-                int userCouponUpdated = userCouponMapper.update(userCouponDO, userCouponUpdateWrapper);
-                if (!SqlHelper.retBool(userCouponUpdated)) {
-                    log.error("修改用户优惠券记录状态已使用异常，请求参数：{}", com.alibaba.fastjson.JSON.toJSONString(requestParam));
-                    throw new ServiceException("修改用户优惠券记录状态异常");
+                case REJECTED -> throw new ClientException("优惠券结算单状态不允许支付");
+                default -> {
                 }
-            } catch (Exception ex) {
-                log.error("核销优惠券结算单失败", ex);
-                status.setRollbackOnly();
-                throw ex;
-            } finally {
-                lock.unlock();
             }
-        });
+            transactionTemplate.executeWithoutResult(status -> {
+                int settlementUpdated = couponSettlementMapper.update(CouponSettlementDO.builder()
+                                .status(2).paymentId(requestParam.getPaymentId()).build(),
+                        Wrappers.lambdaUpdate(CouponSettlementDO.class).eq(CouponSettlementDO::getId, settlement.getId())
+                                .eq(CouponSettlementDO::getUserId, userId).eq(CouponSettlementDO::getStatus, 0));
+                if (settlementUpdated != 1) {
+                    throw new ServiceException("核销优惠券结算单失败");
+                }
+                int couponUpdated = userCouponMapper.update(UserCouponDO.builder()
+                                .status(UserCouponStatusEnum.USED.getCode()).useTime(new Date()).build(),
+                        Wrappers.lambdaUpdate(UserCouponDO.class).eq(UserCouponDO::getId, requestParam.getCouponId())
+                                .eq(UserCouponDO::getUserId, userId).eq(UserCouponDO::getStatus, UserCouponStatusEnum.LOCKING.getCode()));
+                if (couponUpdated != 1) {
+                    throw new ServiceException("修改用户优惠券记录状态失败");
+                }
+            });
+        } finally {
+            unlockSafely(lock);
+        }
     }
 
     @Override
     public void processRefund(CouponProcessRefundReqDTO requestParam) {
+        if (requestParam.getOrderId() == null || StrUtil.isBlank(requestParam.getRefundId())) {
+            throw new ClientException("订单号和退款流水号不能为空");
+        }
         RLock lock = redissonClient.getLock(String.format(EngineRedisConstant.LOCK_COUPON_SETTLEMENT_KEY, requestParam.getCouponId()));
         boolean tryLock = lock.tryLock();
         if (!tryLock) {
@@ -387,56 +411,110 @@ public class UserCouponServiceImpl implements UserCouponService {
         }
 
         try {
-            // 通过编程式事务减小事务范围
-            transactionTemplate.executeWithoutResult(status -> {
-                try {
-                    // 变更优惠券结算单状态为已退款
-                    LambdaUpdateWrapper<CouponSettlementDO> couponSettlementUpdateWrapper = Wrappers.lambdaUpdate(CouponSettlementDO.class)
-                            .eq(CouponSettlementDO::getCouponId, requestParam.getCouponId())
-                            .eq(CouponSettlementDO::getUserId, Long.parseLong(UserContext.getUserId()))
-                            .eq(CouponSettlementDO::getStatus, 2);
-                    CouponSettlementDO couponSettlementDO = CouponSettlementDO.builder()
-                            .status(3)
-                            .build();
-                    int couponSettlementUpdated = couponSettlementMapper.update(couponSettlementDO, couponSettlementUpdateWrapper);
-                    if (!SqlHelper.retBool(couponSettlementUpdated)) {
-                        log.error("优惠券结算单退款异常，请求参数：{}", com.alibaba.fastjson.JSON.toJSONString(requestParam));
-                        throw new ServiceException("核销优惠券结算单异常");
-                    }
-
-                    // 变更用户优惠券状态
-                    LambdaUpdateWrapper<UserCouponDO> userCouponUpdateWrapper = Wrappers.lambdaUpdate(UserCouponDO.class)
-                            .eq(UserCouponDO::getId, requestParam.getCouponId())
-                            .eq(UserCouponDO::getUserId, Long.parseLong(UserContext.getUserId()))
-                            .eq(UserCouponDO::getStatus, UserCouponStatusEnum.USED.getCode());
-                    UserCouponDO userCouponDO = UserCouponDO.builder()
-                            .status(UserCouponStatusEnum.UNUSED.getCode())
-                            .build();
-                    int userCouponUpdated = userCouponMapper.update(userCouponDO, userCouponUpdateWrapper);
-                    if (!SqlHelper.retBool(userCouponUpdated)) {
-                        log.error("修改用户优惠券记录状态未使用异常，请求参数：{}", com.alibaba.fastjson.JSON.toJSONString(requestParam));
-                        throw new ServiceException("修改用户优惠券记录状态异常");
-                    }
-                } catch (Exception ex) {
-                    log.error("执行优惠券结算单退款失败", ex);
-                    status.setRollbackOnly();
-                    throw ex;
+            Long userId = Long.parseLong(UserContext.getUserId());
+            CouponSettlementDO settlement = findSettlement(userId, requestParam.getCouponId(), requestParam.getOrderId());
+            UserCouponDO coupon = findUserCoupon(userId, requestParam.getCouponId());
+            switch (com.nageoffer.onecoupon.engine.service.settlement.CouponSettlementStateMachine.refund(
+                    settlement.getStatus(), coupon.getStatus(), settlement.getRefundId(), requestParam.getRefundId())) {
+                case IDEMPOTENT -> {
+                    return;
                 }
+                case REJECTED -> throw new ClientException("优惠券结算单状态不允许退款");
+                default -> {
+                }
+            }
+            boolean expired = coupon.getValidEndTime() == null || !coupon.getValidEndTime().after(new Date());
+            int nextCouponStatus = expired ? UserCouponStatusEnum.EXPIRED.getCode() : UserCouponStatusEnum.UNUSED.getCode();
+            transactionTemplate.executeWithoutResult(status -> {
+                if (couponSettlementMapper.update(CouponSettlementDO.builder().status(3).refundId(requestParam.getRefundId()).build(),
+                        Wrappers.lambdaUpdate(CouponSettlementDO.class).eq(CouponSettlementDO::getId, settlement.getId())
+                                .eq(CouponSettlementDO::getUserId, userId).eq(CouponSettlementDO::getStatus, 2)) != 1) {
+                    throw new ServiceException("优惠券结算单退款失败");
+                }
+                if (userCouponMapper.update(UserCouponDO.builder().status(nextCouponStatus).useTime(null).build(),
+                        Wrappers.lambdaUpdate(UserCouponDO.class).eq(UserCouponDO::getId, requestParam.getCouponId())
+                                .eq(UserCouponDO::getUserId, userId).eq(UserCouponDO::getStatus, UserCouponStatusEnum.USED.getCode())) != 1) {
+                    throw new ServiceException("修改用户优惠券记录状态失败");
+                }
+                enqueueProjection(userId, coupon, expired ? "REMOVE" : "ADD", requestParam.getRefundId() + ":REFUND");
             });
-
-            // 查询出来优惠券再放回缓存
-            UserCouponDO userCouponDO = userCouponMapper.selectOne(Wrappers.lambdaQuery(UserCouponDO.class)
-                    .eq(UserCouponDO::getUserId, Long.parseLong(UserContext.getUserId()))
-                    .eq(UserCouponDO::getId, requestParam.getCouponId())
-            );
-            String userCouponItemCacheKey = StrUtil.builder()
-                    .append(userCouponDO.getCouponTemplateId())
-                    .append("_")
-                    .append(userCouponDO.getId())
-                    .toString();
-            stringRedisTemplate.opsForZSet().add(String.format(USER_COUPON_TEMPLATE_LIST_KEY, UserContext.getUserId()),
-                    userCouponItemCacheKey, userCouponDO.getValidEndTime().getTime());
         } finally {
+            unlockSafely(lock);
+        }
+    }
+
+    @Override
+    public void cancelPayment(CouponCancelPaymentReqDTO requestParam) {
+        if (requestParam.getOrderId() == null) {
+            throw new ClientException("订单号不能为空");
+        }
+        RLock lock = redissonClient.getLock(String.format(EngineRedisConstant.LOCK_COUPON_SETTLEMENT_KEY, requestParam.getCouponId()));
+        if (!lock.tryLock()) {
+            throw new ClientException("正在取消优惠券结算单，请稍候再试");
+        }
+        try {
+            Long userId = Long.parseLong(UserContext.getUserId());
+            CouponSettlementDO settlement = findSettlement(userId, requestParam.getCouponId(), requestParam.getOrderId());
+            UserCouponDO coupon = findUserCoupon(userId, requestParam.getCouponId());
+            switch (com.nageoffer.onecoupon.engine.service.settlement.CouponSettlementStateMachine.cancel(
+                    settlement.getStatus(), coupon.getStatus())) {
+                case IDEMPOTENT -> {
+                    return;
+                }
+                case REJECTED -> throw new ClientException("优惠券结算单状态不允许取消");
+                default -> {
+                }
+            }
+            boolean expired = coupon.getValidEndTime() == null || !coupon.getValidEndTime().after(new Date());
+            int nextCouponStatus = expired ? UserCouponStatusEnum.EXPIRED.getCode() : UserCouponStatusEnum.UNUSED.getCode();
+            transactionTemplate.executeWithoutResult(status -> {
+                if (couponSettlementMapper.update(CouponSettlementDO.builder().status(1).build(),
+                        Wrappers.lambdaUpdate(CouponSettlementDO.class).eq(CouponSettlementDO::getId, settlement.getId())
+                                .eq(CouponSettlementDO::getUserId, userId).eq(CouponSettlementDO::getStatus, 0)) != 1) {
+                    throw new ServiceException("取消优惠券结算单失败");
+                }
+                if (userCouponMapper.update(UserCouponDO.builder().status(nextCouponStatus).build(),
+                        Wrappers.lambdaUpdate(UserCouponDO.class).eq(UserCouponDO::getId, requestParam.getCouponId())
+                                .eq(UserCouponDO::getUserId, userId).eq(UserCouponDO::getStatus, UserCouponStatusEnum.LOCKING.getCode())) != 1) {
+                    throw new ServiceException("释放锁定优惠券失败");
+                }
+                enqueueProjection(userId, coupon, expired ? "REMOVE" : "ADD",
+                        StrUtil.blankToDefault(requestParam.getRequestId(), UUID.randomUUID().toString()) + ":CANCEL");
+            });
+        } finally {
+            unlockSafely(lock);
+        }
+    }
+
+    private CouponSettlementDO findSettlement(Long userId, Long couponId, Long orderId) {
+        CouponSettlementDO settlement = couponSettlementMapper.selectOne(Wrappers.lambdaQuery(CouponSettlementDO.class)
+                .eq(CouponSettlementDO::getUserId, userId).eq(CouponSettlementDO::getCouponId, couponId)
+                .eq(CouponSettlementDO::getOrderId, orderId));
+        if (settlement == null) {
+            throw new ClientException("优惠券结算单不存在");
+        }
+        return settlement;
+    }
+
+    private UserCouponDO findUserCoupon(Long userId, Long couponId) {
+        UserCouponDO coupon = userCouponMapper.selectOne(Wrappers.lambdaQuery(UserCouponDO.class)
+                .eq(UserCouponDO::getId, couponId).eq(UserCouponDO::getUserId, userId));
+        if (coupon == null) {
+            throw new ClientException("优惠券不存在");
+        }
+        return coupon;
+    }
+
+    private void enqueueProjection(Long userId, UserCouponDO coupon, String action, String requestId) {
+        userCouponSettlementProjectionOutboxMapper.insertIgnore(UserCouponSettlementProjectionOutboxDO.builder()
+                .id(IdUtil.getSnowflakeNextId()).userId(userId).couponId(coupon.getId())
+                .couponTemplateId(coupon.getCouponTemplateId()).action(action).requestId(requestId)
+                .validEndTime(coupon.getValidEndTime()).status("NEW").attempts(0).retryAt(new Date())
+                .createTime(new Date()).updateTime(new Date()).build());
+    }
+
+    private void unlockSafely(RLock lock) {
+        if (lock.isHeldByCurrentThread()) {
             lock.unlock();
         }
     }

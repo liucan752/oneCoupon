@@ -37,6 +37,7 @@ package com.nageoffer.onecoupon.engine.controller;
 import com.nageoffer.onecoupon.engine.dto.req.CouponCreatePaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponProcessPaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponProcessRefundReqDTO;
+import com.nageoffer.onecoupon.engine.dto.req.CouponCancelPaymentReqDTO;
 import com.nageoffer.onecoupon.engine.dto.req.CouponTemplateRedeemReqDTO;
 import com.nageoffer.onecoupon.engine.service.UserCouponService;
 import com.nageoffer.onecoupon.framework.result.Result;
@@ -94,6 +95,13 @@ public class UserCouponController {
     @PostMapping("/api/engine/user-coupon/process-refund")
     public Result<Void> processRefund(@RequestBody CouponProcessRefundReqDTO requestParam) {
         userCouponService.processRefund(requestParam);
+        return Results.success();
+    }
+
+    @Operation(summary = "取消优惠券结算单", description = "订单取消或支付超时后释放锁定中的优惠券")
+    @PostMapping("/api/engine/user-coupon/cancel-payment")
+    public Result<Void> cancelPayment(@RequestBody CouponCancelPaymentReqDTO requestParam) {
+        userCouponService.cancelPayment(requestParam);
         return Results.success();
     }
 }
