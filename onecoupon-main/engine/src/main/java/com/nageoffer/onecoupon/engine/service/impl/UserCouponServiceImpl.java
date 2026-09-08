@@ -110,9 +110,7 @@ public class UserCouponServiceImpl implements UserCouponService {
 
     private final CouponTemplateService couponTemplateService;
     private final UserCouponMapper userCouponMapper;
-    private final CouponTemplateMapper couponTemplateMapper;
     private final CouponSettlementMapper couponSettlementMapper;
-    private final UserCouponExpireOutboxMapper userCouponExpireOutboxMapper;
     private final UserCouponRedeemOutboxMapper userCouponRedeemOutboxMapper;
     private final UserCouponSettlementProjectionOutboxMapper userCouponSettlementProjectionOutboxMapper;
 
@@ -312,6 +310,7 @@ public class UserCouponServiceImpl implements UserCouponService {
             }
 
             // 通过编程式事务减小事务范围
+            BigDecimal finalDiscountAmount = discountAmount;
             transactionTemplate.executeWithoutResult(status -> {
                 try {
                     // 创建优惠券结算单记录
@@ -320,7 +319,7 @@ public class UserCouponServiceImpl implements UserCouponService {
                             .couponId(requestParam.getCouponId())
                             .userId(userId)
                             .requestId(requestId)
-                            .discountAmount(discountAmount)
+                            .discountAmount(finalDiscountAmount)
                             .status(0)
                             .build();
                     couponSettlementMapper.insert(couponSettlementDO);
